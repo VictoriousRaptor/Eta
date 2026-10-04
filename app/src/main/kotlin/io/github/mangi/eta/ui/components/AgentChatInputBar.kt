@@ -131,10 +131,10 @@ internal fun AgentChatInputBar(
     onAttachFilePath: (String) -> Unit,
     onRemoveFileReference: (String) -> Unit,
     onCancelMessageEdit: () -> Unit,
+    modifier: Modifier = Modifier,
     steerEnabled: Boolean = false,
     interactionSubmitting: Boolean = false,
     steerAcknowledgement: SteerAcknowledgement? = null,
-    modifier: Modifier = Modifier,
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }

@@ -335,6 +335,7 @@ internal fun AgentOverlayBubble(
     val accent = phaseAccent(state.phase)
     val statusText = state.status.localizedText()
     val dotAlpha = rememberStatusDotPulse(active = state.phase == AgentOverlayPhase.RUNNING && state.pendingUserInput == null)
+    val canSupplement = steerEnabled || state.phase == AgentOverlayPhase.FINISHED || state.phase == AgentOverlayPhase.FAILED
     LaunchedEffect(state.pendingUserInput?.id) {
         if (state.pendingUserInput != null) {
             onSupplementModeChange(true)
@@ -396,7 +397,7 @@ internal fun AgentOverlayBubble(
             }
 
             AnimatedVisibility(
-                visible = supplementMode,
+                visible = supplementMode && canSupplement,
                 enter = expandVertically(
                     animationSpec = spring(
                         dampingRatio = Spring.DampingRatioNoBouncy,
@@ -419,7 +420,7 @@ internal fun AgentOverlayBubble(
             }
 
             AnimatedVisibility(
-                visible = !supplementMode,
+                visible = !supplementMode || !canSupplement,
                 enter = expandVertically(
                     animationSpec = spring(
                         dampingRatio = Spring.DampingRatioNoBouncy,
@@ -438,7 +439,7 @@ internal fun AgentOverlayBubble(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                 ) {
-                    if (steerEnabled) OverlayControlButton(
+                    if (canSupplement) OverlayControlButton(
                         onClick = ::enterSupplementMode,
                         icon = Icons.Rounded.Edit,
                         contentDescription = stringResource(R.string.overlay_supplement),

@@ -25,6 +25,8 @@ class PrefsDefaultsTest {
                 Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS to true,
                 Prefs.Keys.AGENT_THINKING_ENABLED to true,
                 Prefs.Keys.AGENT_AUTO_COMPACTION_ENABLED to true,
+                Prefs.Keys.AGENT_STEER_ENABLED to true,
+                Prefs.Keys.AGENT_CLARIFY_ENABLED to true,
             ),
             Prefs.Keys.BOOLEAN_DEFAULTS,
         )
@@ -44,6 +46,8 @@ class PrefsDefaultsTest {
                 Prefs.Keys.AGENT_DEVICE_SENSITIVE_ACTION_TOOLS,
                 Prefs.Keys.AGENT_THINKING_ENABLED,
                 Prefs.Keys.AGENT_AUTO_COMPACTION_ENABLED,
+                Prefs.Keys.AGENT_STEER_ENABLED,
+                Prefs.Keys.AGENT_CLARIFY_ENABLED,
             ),
             Prefs.Keys.LOCAL_AGENT_KEYS,
         )

@@ -50,7 +50,14 @@ class AgentRuntimeWireTest {
 
     @Test
     fun clarifySettingSurvivesWireAndOldRequestsDefaultToEnabled() {
-        val config = AgentModelClient.ModelConfig(baseUrl = "https://example.invalid", apiKey = "fixture", model = "fixture", systemPrompt = "", contextWindow = 900_000)
+        val config = AgentModelClient.ModelConfig(
+            baseUrl = "https://example.invalid",
+            apiKey = "fixture",
+            model = "fixture",
+            systemPrompt = "",
+            contextWindow = 900_000,
+            reasoningEffort = ReasoningEffort.OFF,
+        )
         for (enabled in listOf(false, true)) {
             val request = AgentRuntimeWire.RunRequest(runId = "clarify", prompt = "继续", config = config.copy(clarifyEnabled = enabled), images = emptyList())
             val bundle = AgentRuntimeWire.toLegacyBundle(request)

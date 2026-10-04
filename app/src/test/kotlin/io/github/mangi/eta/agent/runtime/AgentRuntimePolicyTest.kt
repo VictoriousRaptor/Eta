@@ -73,6 +73,7 @@ class AgentRuntimePolicyTest {
                 browserTools = false,
                 thinking = false,
                 autoCompaction = false,
+                clarify = false,
             ),
             AgentRuntimePolicy.permissions(preferences),
         )

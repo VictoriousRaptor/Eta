@@ -766,7 +766,11 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         activeSession?.controller?.resume()
         state.value = state.value.copy(
             phase = AgentOverlayPhase.RUNNING,
-            status = AgentOverlayStatus.Continuing,
+            status = if (state.value.pendingUserInput != null) {
+                AgentOverlayStatus.WaitingForUser
+            } else {
+                AgentOverlayStatus.Continuing
+            },
         )
     }
 

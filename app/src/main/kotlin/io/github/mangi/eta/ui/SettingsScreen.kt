@@ -8,13 +8,13 @@ import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.automirrored.rounded.Help
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.AccessibilityNew
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Cloud
-import androidx.compose.material.icons.rounded.Chat
-import androidx.compose.material.icons.rounded.Help
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Description
@@ -410,7 +410,7 @@ private fun SettingsPageContent(
                         title = stringResource(R.string.settings_steer),
                         summary = stringResource(R.string.settings_steer_summary),
                         key = Prefs.Keys.AGENT_STEER_ENABLED,
-                        icon = Icons.Rounded.Chat, iconTint = EtaPreferenceColors.Blue,
+                        icon = Icons.AutoMirrored.Rounded.Chat, iconTint = EtaPreferenceColors.Blue,
                     )
                     EtaPreferenceDivider()
                     SwitchPref(
@@ -418,7 +418,7 @@ private fun SettingsPageContent(
                         title = stringResource(R.string.settings_clarify),
                         summary = stringResource(R.string.settings_clarify_summary),
                         key = Prefs.Keys.AGENT_CLARIFY_ENABLED,
-                        icon = Icons.Rounded.Help, iconTint = EtaPreferenceColors.Green,
+                        icon = Icons.AutoMirrored.Rounded.Help, iconTint = EtaPreferenceColors.Green,
                     )
                     EtaPreferenceDivider()
                     EtaArrowPreference(
