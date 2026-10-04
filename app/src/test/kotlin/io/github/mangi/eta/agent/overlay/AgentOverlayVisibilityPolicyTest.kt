@@ -7,6 +7,26 @@ import org.junit.Test
 
 class AgentOverlayVisibilityPolicyTest {
     @Test
+    fun clarificationRevealsAnAnswerSurfaceAndKeepsPauseIndependent() {
+        val request = io.github.mangi.eta.agent.runtime.AgentUserInputRequest("question", listOf(
+            io.github.mangi.eta.agent.runtime.AgentUserInputQuestion("city", "目的地？"),
+        ))
+        val event = AgentEvent.UserInputRequested(request)
+        assertTrue(AgentOverlayVisibilityPolicy.shouldRevealFor(event))
+        assertTrue(AgentOverlayVisibilityPolicy.shouldDismissEntrySurfaceFor(event))
+        val waiting = AgentOverlayState(phase = AgentOverlayPhase.PAUSED).applyEvent(event)
+        val supplemented = waiting.applyEvent(AgentEvent.UserSupplementReceived(1, "补充"))
+        org.junit.Assert.assertEquals(AgentOverlayPhase.PAUSED, supplemented.phase)
+        org.junit.Assert.assertEquals(request, supplemented.pendingUserInput)
+        val answered = supplemented.applyEvent(AgentEvent.UserInputAnswered(
+            io.github.mangi.eta.agent.runtime.AgentUserInputAnswer(request.id, mapOf("city" to "广州")),
+        ))
+        org.junit.Assert.assertNull(answered.pendingUserInput)
+        org.junit.Assert.assertEquals(AgentOverlayPhase.PAUSED, answered.phase)
+        org.junit.Assert.assertEquals(AgentOverlayStatus.Paused, answered.status)
+    }
+
+    @Test
     fun `text-only and background tool events do not reveal operation overlay`() {
         val events = listOf(
             AgentEvent.RunStarted(

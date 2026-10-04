@@ -8,10 +8,11 @@ import io.github.mangi.eta.agent.runtime.AgentEvent
  * Chat, reasoning, shell diagnostics, file reads, skill reads and app search
  * all have good homes in the main conversation UI. The global overlay is
  * reserved for tools that actively inspect or drive the foreground Android
- * interface.
+ * interface, and questions that require an answer before execution can continue.
  */
 internal object AgentOverlayVisibilityPolicy {
     fun shouldRevealFor(event: AgentEvent): Boolean = when (event) {
+        is AgentEvent.UserInputRequested -> true
         is AgentEvent.AssistantBlockStart ->
             event.kind == AgentEvent.AssistantBlockKind.TOOL_CALL &&
                 event.name.isForegroundDrivingTool()
@@ -26,6 +27,7 @@ internal object AgentOverlayVisibilityPolicy {
     }
 
     fun shouldDismissEntrySurfaceFor(event: AgentEvent): Boolean = when (event) {
+        is AgentEvent.UserInputRequested -> true
         is AgentEvent.AssistantBlockStart ->
             event.kind == AgentEvent.AssistantBlockKind.TOOL_CALL &&
                 event.name.requiresEntrySurfaceDismissal()

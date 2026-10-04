@@ -1297,4 +1297,14 @@
   <string name="speech_credentials_lost">語音憑據無法解密，請重新填寫並儲存</string>
   <string name="speech_save_retry">請重試</string>
   <string name="system_notice_model_retry">模型請求重試</string>
+    <string name="settings_steer">中途插話</string>
+    <string name="settings_steer_summary">Eta 工作時照常打字，傳送後會加入正在執行的這一輪，目前思考和工具批次結束後就能看到；關閉後保持原有行為。</string>
+    <string name="settings_clarify">不確定時問我</string>
+    <string name="settings_clarify_summary">缺少只有你能提供的關鍵資訊時，Eta 會停下來問幾個短問題，收到回答後繼續這一輪。對新任務生效。</string>
+    <string name="clarify_waiting">等待你的回答</string>
+    <string name="clarify_free_text">輸入你的回答</string>
+    <string name="clarify_submit">回答並繼續</string>
+    <string name="interaction_rejected">目前任務未確認接收，已保留輸入。</string>
+    <string name="chat_steer_hint">補充這次任務的要求</string>
+    <string name="chat_steer_send">傳送補充</string>
 </resources>

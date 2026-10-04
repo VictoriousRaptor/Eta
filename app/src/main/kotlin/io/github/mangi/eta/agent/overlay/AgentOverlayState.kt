@@ -2,6 +2,7 @@ package io.github.mangi.eta.agent.overlay
 
 import androidx.compose.runtime.Immutable
 import io.github.mangi.eta.agent.runtime.AgentEvent
+import io.github.mangi.eta.agent.runtime.AgentUserInputRequest
 
 /** Agent 浮窗所处的阶段。 */
 internal enum class AgentOverlayPhase { RUNNING, PAUSED, FINISHED, FAILED }
@@ -15,6 +16,7 @@ internal data class AgentOverlayState(
     val round: Int = 0,
     val status: AgentOverlayStatus = AgentOverlayStatus.Preparing,
     val detailText: String = "",
+    val pendingUserInput: AgentUserInputRequest? = null,
 ) {
     companion object {
         val Initial = AgentOverlayState(status = AgentOverlayStatus.Received)
@@ -28,6 +30,11 @@ internal data class AgentOverlayState(
  * 工具名经 [toToolLabel] 中文化。详细 trace 流作为后续任务，此处不展开。
  */
 internal fun AgentOverlayState.applyEvent(event: AgentEvent): AgentOverlayState = when (event) {
+    is AgentEvent.UserInputRequested -> copy(pendingUserInput = event.request, status = AgentOverlayStatus.WaitingForUser)
+    is AgentEvent.UserInputAnswered -> copy(
+        pendingUserInput = null,
+        status = if (phase == AgentOverlayPhase.PAUSED) AgentOverlayStatus.Paused else AgentOverlayStatus.Continuing,
+    )
     is AgentEvent.ContextCompaction -> copy(status = AgentOverlayStatus.RequestingModel, detailText = event.displayMessage)
     is AgentEvent.RunStarted -> copy(
         phase = AgentOverlayPhase.RUNNING,
@@ -99,8 +106,7 @@ internal fun AgentOverlayState.applyEvent(event: AgentEvent): AgentOverlayState 
     is AgentEvent.UsageReceived -> this
 
     is AgentEvent.UserSupplementReceived -> copy(
-        phase = AgentOverlayPhase.RUNNING,
-        status = AgentOverlayStatus.SupplementReceived,
+        status = if (pendingUserInput != null) AgentOverlayStatus.WaitingForUser else if (phase == AgentOverlayPhase.PAUSED) AgentOverlayStatus.Paused else AgentOverlayStatus.SupplementReceived,
         detailText = "",
     )
 
@@ -135,12 +141,14 @@ internal fun AgentOverlayState.applyEvent(event: AgentEvent): AgentOverlayState 
     )
 
     is AgentEvent.RunFinished -> copy(
+        pendingUserInput = null,
         phase = AgentOverlayPhase.FINISHED,
         round = event.round,
         status = AgentOverlayStatus.ResultReady,
     )
 
     is AgentEvent.RunFailed -> copy(
+        pendingUserInput = null,
         phase = AgentOverlayPhase.FAILED,
         status = AgentOverlayStatus.RunFailed,
         detailText = event.reason,

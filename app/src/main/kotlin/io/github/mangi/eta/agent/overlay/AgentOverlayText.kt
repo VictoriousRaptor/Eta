@@ -21,6 +21,7 @@ internal sealed interface AgentOverlayStatus {
     data object PreparingAnswer : AgentOverlayStatus
     data class PlanningTools(val names: List<String>) : AgentOverlayStatus
     data object SupplementReceived : AgentOverlayStatus
+    data object WaitingForUser : AgentOverlayStatus
     data class RunningTool(val name: String) : AgentOverlayStatus
     data class ToolCompleted(val name: String) : AgentOverlayStatus
     data class HostedToolRunning(val name: String) : AgentOverlayStatus
@@ -39,6 +40,7 @@ internal sealed interface AgentOverlayStatus {
 
 @Composable
 internal fun AgentOverlayStatus.localizedText(): String = when (this) {
+    AgentOverlayStatus.WaitingForUser -> stringResource(R.string.clarify_waiting)
     AgentOverlayStatus.Preparing -> stringResource(R.string.overlay_preparing)
     AgentOverlayStatus.Received -> stringResource(R.string.overlay_received)
     is AgentOverlayStatus.PreparingTools -> pluralStringResource(
@@ -85,6 +87,7 @@ internal fun toolDisplayName(name: String): String {
 
 @StringRes
 internal fun toolDisplayNameResource(name: String): Int? = when (name) {
+    "request_user_input" -> R.string.settings_clarify
     "observe_screen" -> R.string.tool_observe_screen
     "tap" -> R.string.tool_tap
     "tap_element" -> R.string.tool_tap_element

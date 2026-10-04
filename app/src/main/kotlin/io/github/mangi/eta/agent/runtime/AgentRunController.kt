@@ -19,6 +19,9 @@ internal class AgentRunController {
 
     private val lock = ReentrantLock()
     private val pauseCondition = lock.newCondition()
+    private val userInputCondition = lock.newCondition()
+    private var userInputRequest: AgentUserInputRequest? = null
+    private var userInputAnswer: AgentUserInputAnswer? = null
     private val steeringMessages = ArrayDeque<String>()
     private var acceptingSteering = true
     @Volatile
@@ -31,6 +34,7 @@ internal class AgentRunController {
             steeringMessages.clear()
             paused = false
             pauseCondition.signalAll()
+            userInputCondition.signalAll()
         }
         resources.forEach { resource ->
             runCatching { resource.cancel() }
@@ -67,6 +71,52 @@ internal class AgentRunController {
 
     val hasPendingSteering: Boolean
         get() = lock.withLock { steeringMessages.isNotEmpty() }
+
+    /** 澄清等待独立于用户暂停和 steering；只接受当前请求的一份完整答案。 */
+    fun answerUserInput(answer: AgentUserInputAnswer): Boolean = lock.withLock {
+        val request = userInputRequest ?: return false
+        if (cancelled || userInputAnswer != null || !request.accepts(answer)) return false
+        userInputAnswer = answer
+        userInputCondition.signalAll()
+        true
+    }
+
+    fun awaitUserInput(
+        request: AgentUserInputRequest,
+        onRequested: () -> Unit,
+    ): AgentUserInputAnswer {
+        lock.withLock {
+            if (cancelled) throw AgentRunCancelledException()
+            check(userInputRequest == null) { "Already waiting for user input" }
+            userInputRequest = request
+            userInputAnswer = null
+        }
+        try {
+            onRequested()
+            return lock.withLock {
+                while (userInputAnswer == null && !cancelled) {
+                    try {
+                        userInputCondition.await()
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        cancelled = true
+                        acceptingSteering = false
+                        steeringMessages.clear()
+                        paused = false
+                        pauseCondition.signalAll()
+                        throw AgentRunCancelledException()
+                    }
+                }
+                if (cancelled) throw AgentRunCancelledException()
+                checkNotNull(userInputAnswer)
+            }
+        } finally {
+            lock.withLock {
+                userInputRequest = null
+                userInputAnswer = null
+            }
+        }
+    }
 
     /**
      * 暂停执行：后续 [throwIfCancelled] 调用会阻塞挂起，直到 [resume] 或 [cancel]。

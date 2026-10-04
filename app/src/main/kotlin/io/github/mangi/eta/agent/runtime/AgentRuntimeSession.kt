@@ -104,6 +104,10 @@ internal class AgentRuntimeSession(
             }
         }
 
+    fun answerUserInput(answer: AgentUserInputAnswer): Boolean = lock.withLock {
+        state == State.RUNNING && operation == AgentRuntimeWire.OP_CHAT && controller.answerUserInput(answer)
+    }
+
     private fun recordForReplay(event: AgentEvent) {
         val projected = event.recoveryProjection() ?: return
         if (projected !is AgentEvent.AssistantBlockDelta) {

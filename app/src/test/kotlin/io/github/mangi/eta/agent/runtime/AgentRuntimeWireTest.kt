@@ -28,6 +28,39 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36])
 class AgentRuntimeWireTest {
     @Test
+    fun clarificationEventsSurviveIpcArchiveAndSessionReplay() {
+        val request = AgentUserInputRequest("request", listOf(AgentUserInputQuestion("city", "目的地？", listOf("广州", "深圳"))))
+        val answer = AgentUserInputAnswer(request.id, mapOf("city" to "佛山"))
+        val requested = AgentEvent.UserInputRequested(request)
+        val answered = AgentEvent.UserInputAnswered(answer)
+        val session = AgentRuntimeSession("run")
+        session.emit(requested)
+        val replay = mutableListOf<AgentEvent>()
+        assertTrue(session.attach(replay::add, {}))
+        assertEquals(listOf(requested), replay)
+        session.emit(answered)
+        assertEquals(listOf(requested, answered), replay)
+        for (event in listOf(requested, answered)) {
+            assertEquals(event, AgentRuntimeWire.eventFromBundle(AgentRuntimeWire.eventToBundle(event)))
+            assertEquals(event, AgentEventJsonCodec.decode(AgentEventJsonCodec.encode(event)))
+            assertFalse(event.toLogLine().contains("广州"))
+            assertFalse(event.toLogLine().contains("佛山"))
+        }
+    }
+
+    @Test
+    fun clarifySettingSurvivesWireAndOldRequestsDefaultToEnabled() {
+        val config = AgentModelClient.ModelConfig(baseUrl = "https://example.invalid", apiKey = "fixture", model = "fixture", systemPrompt = "", contextWindow = 900_000)
+        for (enabled in listOf(false, true)) {
+            val request = AgentRuntimeWire.RunRequest(runId = "clarify", prompt = "继续", config = config.copy(clarifyEnabled = enabled), images = emptyList())
+            val bundle = AgentRuntimeWire.toLegacyBundle(request)
+            assertEquals(request, AgentRuntimeWire.runRequestFromBundle(bundle))
+            bundle.remove("clarify_enabled")
+            assertTrue(AgentRuntimeWire.runRequestFromBundle(bundle).config.clarifyEnabled)
+        }
+    }
+
+    @Test
     fun automaticCompactionSettingSurvivesIpcAndDefaultsForOldRequests() {
         val config = AgentModelClient.ModelConfig(
             baseUrl = "https://example.invalid", apiKey = "fixture", model = "fixture", systemPrompt = "",

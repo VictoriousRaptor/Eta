@@ -13,6 +13,8 @@ import androidx.compose.material.icons.rounded.AccessibilityNew
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.Chat
+import androidx.compose.material.icons.rounded.Help
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Description
@@ -403,13 +405,26 @@ private fun SettingsPageContent(
                     )
 
                     EtaPreferenceDivider()
+                    SwitchPref(
+                        context = context, prefs = agentPrefs,
+                        title = stringResource(R.string.settings_steer),
+                        summary = stringResource(R.string.settings_steer_summary),
+                        key = Prefs.Keys.AGENT_STEER_ENABLED,
+                        icon = Icons.Rounded.Chat, iconTint = EtaPreferenceColors.Blue,
+                    )
+                    EtaPreferenceDivider()
+                    SwitchPref(
+                        context = context, prefs = agentPrefs,
+                        title = stringResource(R.string.settings_clarify),
+                        summary = stringResource(R.string.settings_clarify_summary),
+                        key = Prefs.Keys.AGENT_CLARIFY_ENABLED,
+                        icon = Icons.Rounded.Help, iconTint = EtaPreferenceColors.Green,
+                    )
+                    EtaPreferenceDivider()
                     EtaArrowPreference(
                         title = stringResource(R.string.ui_linux_tool_environment_314d22),
                         startAction = {
-                            EtaPreferenceIcon(
-                                icon = Icons.Rounded.Inventory2,
-                                tint = EtaPreferenceColors.Orange,
-                            )
+                            EtaPreferenceIcon(Icons.Rounded.Inventory2, tint = EtaPreferenceColors.Orange)
                         },
                         onClick = { onNavigate(AppRoute.LinuxEnvironment) },
                     )

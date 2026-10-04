@@ -1331,4 +1331,14 @@
   <string name="speech_test_result">Recognition result: %1$s</string>
   <string name="speech_credentials_lost">Speech credentials could not be decrypted; enter and save them again</string>
   <string name="speech_save_retry">try again</string>
+    <string name="settings_steer">Interrupt while working</string>
+    <string name="settings_steer_summary">Send a text update during a task. Eta reads it after the current model turn and tool batch. Turn off to keep the existing behavior.</string>
+    <string name="settings_clarify">Ask when uncertain</string>
+    <string name="settings_clarify_summary">When key information is missing, Eta asks a few short questions and continues the same task after you answer. Applies to new tasks.</string>
+    <string name="clarify_waiting">Waiting for your answer</string>
+    <string name="clarify_free_text">Type your answer</string>
+    <string name="clarify_submit">Answer and continue</string>
+    <string name="interaction_rejected">The task could not accept this input. Your draft has been kept.</string>
+    <string name="chat_steer_hint">Add an instruction to this task</string>
+    <string name="chat_steer_send">Send update</string>
 </resources>

@@ -15,12 +15,14 @@ internal object AgentToolCatalog {
         skillGitHubInstall: Boolean = false,
         memoryTools: Boolean = false,
         memoryWritable: Boolean = true,
+        clarifyEnabled: Boolean = false,
         capabilities: AgentToolCapabilities = AgentToolCapabilities(rootAvailable = true),
     ): JSONArray =
         capabilities.project(JSONArray().also { tools ->
             AgentContextAppToolCatalog.appendTo(tools)
             AgentGestureToolCatalog.appendTo(tools)
             AgentTextSystemToolCatalog.appendTo(tools)
+            if (clarifyEnabled) AgentInteractionToolCatalog.appendTo(tools)
             AgentDeviceToolCatalog.appendTo(
                 tools,
                 directTools = deviceDirectTools,

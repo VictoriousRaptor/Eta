@@ -2,6 +2,7 @@ package io.github.mangi.eta.ui.screens.home
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
+import io.github.mangi.eta.ui.components.rememberSteeringEnabled
 import androidx.compose.ui.Modifier
 import io.github.mangi.eta.ui.components.AgentChatBody
 import io.github.mangi.eta.ui.components.chatConversationCompositionKey
@@ -24,6 +25,7 @@ internal fun AgentHomeScreen(
     isDrawerOpen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val steerEnabled = rememberSteeringEnabled()
     key(chatConversationCompositionKey(conversationKey)) {
         AgentChatBody(
             messages = state.messages,
@@ -31,6 +33,11 @@ internal fun AgentHomeScreen(
             isCompacting = state.isCompacting,
             input = state.input,
             isStreaming = state.isStreaming,
+            steerEnabled = steerEnabled && !state.isCompacting && state.roleplayMessages.pendingRewrites.isEmpty(),
+            interactionSubmitting = state.interactionSubmitting,
+            steerAcknowledgement = state.steerAcknowledgement,
+            pendingUserInput = state.pendingUserInput.takeIf { state.isStreaming },
+            onAnswerUserInput = { onAction(AgentHomeAction.AnswerUserInput(it)) },
             reasoningEffort = state.reasoningEffort,
             availableReasoningEfforts = state.availableReasoningEfforts,
             pendingImages = state.pendingImages,

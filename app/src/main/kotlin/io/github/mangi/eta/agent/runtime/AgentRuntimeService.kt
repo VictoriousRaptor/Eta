@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.os.Handler
+import android.os.Bundle
 import android.os.IBinder
 import android.os.Looper
 import android.os.Message
@@ -207,6 +208,23 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                 AgentRuntimeWire.MSG_CANCEL -> {
                     val runId = msg.data?.let(AgentRuntimeWire::runIdFromBundle).orEmpty()
                     if (runId.isNotBlank()) cancelRun(runId)
+                }
+
+                AgentRuntimeWire.MSG_STEER,
+                AgentRuntimeWire.MSG_ANSWER_USER_INPUT -> {
+                    val runId = AgentRuntimeWire.runIdFromBundle(msg.data)
+                    val payload = msg.data.getString("payload").orEmpty()
+                    val accepted = payload.length <= 32000 && if (msg.what == AgentRuntimeWire.MSG_STEER) {
+                        requestSupplement(payload, expectedRunId = runId)
+                    } else {
+                        val answer = runCatching { AgentUserInputCodec.answer(payload) }.getOrNull()
+                        answer != null && activeSession?.takeIf { it.runId == runId }?.answerUserInput(answer) == true
+                    }
+                    runCatching {
+                        msg.replyTo?.send(Message.obtain(null, AgentRuntimeWire.MSG_CONTROL_RESPONSE).apply {
+                            data = Bundle().apply { putBoolean("accepted", accepted) }
+                        })
+                    }
                 }
 
                 AgentRuntimeWire.MSG_ACK_RESULT -> {
@@ -423,6 +441,11 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             if (session.isTerminal) return@post
             runCatching {
                 state.value = state.value.applyEvent(event)
+                if (event is AgentEvent.UserInputRequested && entrySurfaceReady) {
+                    collapsed.value = false
+                    ensureOverlayVisible()
+                    windowManager?.let(::showBubble)
+                }
                 if (revealsForegroundOperation && entrySurfaceReady) {
                     if (orbView == null) {
                         AgentHapticFeedback.perform(
@@ -747,10 +770,12 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         )
     }
 
-    private fun requestSupplement(text: String) {
+    private fun requestSupplement(text: String, expectedRunId: String? = null): Boolean {
         val supplementText = text.trim()
-        if (supplementText.isBlank()) return
-        setBubbleInputMode(focusable = false)
+        if (supplementText.isBlank() || supplementText.length > 32000) return false
+        if (expectedRunId != null && activeSession?.runId != expectedRunId) return false
+        if (activeSession?.isTerminal == false && !Prefs.isEnabled(Prefs.Keys.AGENT_STEER_ENABLED)) return false
+        setBubbleInputMode(focusable = state.value.pendingUserInput != null)
         activeSession?.let { session ->
             val event = session.steer(supplementText) {
                 recordSupplementEvent(supplementText)
@@ -760,22 +785,23 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                     state.value = state.value.copy(
                         status = AgentOverlayStatus.Finishing,
                     )
-                    return
+                    return false
                 }
             } else {
                 AndroidAgentLogger.info(
                     "Agent runtime supplement received: index=${event.index}, chars=${event.text.length}"
                 )
                 state.value = state.value.applyEvent(event)
-                return
+                return true
             }
         }
 
-        val completed = lastCompletedRunContext ?: return
+        if (expectedRunId != null) return false
+        val completed = lastCompletedRunContext ?: return false
         if (completed.request.operation != AgentRuntimeWire.OP_CHAT ||
             completed.request.handoff?.source != AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE) {
             state.value = state.value.copy(status = AgentOverlayStatus.ContinuationUnavailable)
-            return
+            return false
         }
         val continuationRequest = AgentContinuationBuilder.build(
             request = completed.request,
@@ -783,6 +809,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             supplement = supplementText,
         )
         startRun(continuationRequest)
+        return true
     }
 
     private fun recordSupplementEvent(text: String): AgentEvent.UserSupplementReceived {
@@ -868,8 +895,15 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                 onPause = ::requestPause,
                 onResume = ::requestResume,
                 onStop = ::requestStop,
-                onSupplementModeChange = ::setBubbleInputMode,
-                onSupplement = ::requestSupplement,
+                onSupplementModeChange = { focusable -> setBubbleInputMode(focusable || state.value.pendingUserInput != null) },
+                onSupplement = { text -> requestSupplement(text) },
+                steerEnabled = io.github.mangi.eta.ui.components.rememberSteeringEnabled(),
+                onAnswerUserInput = { answer ->
+                    if (activeSession?.answerUserInput(answer) == true) {
+                        state.value = state.value.copy(pendingUserInput = null)
+                        setBubbleInputMode(focusable = false)
+                    }
+                },
             )
         }
         val lp = bubbleLayoutParams()

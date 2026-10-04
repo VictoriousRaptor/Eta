@@ -2,6 +2,8 @@ package io.github.mangi.eta.agent.model
 
 import io.github.mangi.eta.agent.runtime.AgentEvent
 import io.github.mangi.eta.agent.runtime.AgentRunController
+import io.github.mangi.eta.agent.runtime.AgentUserInputRequest
+import io.github.mangi.eta.agent.runtime.AgentUserInputCodec
 import io.github.mangi.eta.agent.roleplay.RoleplayRunContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -281,7 +283,21 @@ internal class AgentLoop(
         )
 
         val result = try {
-            toolExecutor.execute(toolCall)
+            if (toolCall.name == AgentInteractionToolCatalog.REQUEST_USER_INPUT) {
+                check(config.clarifyEnabled && purpose == ProviderRequestPurpose.CHAT)
+                val request = AgentUserInputRequest.fromToolArguments(
+                    "input-${java.util.UUID.randomUUID()}", toolCall.argumentsJson,
+                )
+                val answer = runController.awaitUserInput(request) {
+                    onEvent(AgentEvent.UserInputRequested(request))
+                }
+                onEvent(AgentEvent.UserInputAnswered(answer))
+                AgentModelClient.ToolResult(
+                    JSONObject(AgentUserInputCodec.encode(answer)).put("ok", true).toString(),
+                )
+            } else {
+                toolExecutor.execute(toolCall)
+            }
         } catch (throwable: Exception) {
             runController.throwIfCancelled()
             AgentModelClient.ToolResult(

@@ -617,6 +617,20 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
                 }
             }
 
+            is AgentEvent.UserInputRequested -> {
+                val id = "clarification-$runId-${event.request.id}"
+                if (messages.none { it.id == id }) {
+                    messages = messages + AgentMessageUi(id, event.request.questions.joinToString("\n\n") { it.question })
+                }
+            }
+
+            is AgentEvent.UserInputAnswered -> {
+                val id = "clarification-answer-$runId-${event.answer.requestId}"
+                if (messages.none { it.id == id }) {
+                    messages = messages + UserMessageUi(id, event.answer.answers.values.joinToString("\n\n"))
+                }
+            }
+
             is AgentEvent.ToolStarted -> {
                 status = EtaVoiceStatus.RunningTool(event.name)
                 messages = runMessageProjector.startTool(

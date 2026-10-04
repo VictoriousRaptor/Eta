@@ -79,6 +79,7 @@ import io.github.mangi.eta.ui.model.AgentContextUsageUi
 import io.github.mangi.eta.ui.model.AgentModelPickerUiState
 import io.github.mangi.eta.ui.model.PendingFileReferenceUi
 import io.github.mangi.eta.ui.model.PendingImageUi
+import io.github.mangi.eta.ui.model.SteerAcknowledgement
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.Icon
@@ -130,6 +131,9 @@ internal fun AgentChatInputBar(
     onAttachFilePath: (String) -> Unit,
     onRemoveFileReference: (String) -> Unit,
     onCancelMessageEdit: () -> Unit,
+    steerEnabled: Boolean = false,
+    interactionSubmitting: Boolean = false,
+    steerAcknowledgement: SteerAcknowledgement? = null,
     modifier: Modifier = Modifier,
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
@@ -147,6 +151,13 @@ internal fun AgentChatInputBar(
     val canSend = textFieldState.text.isNotBlank() ||
         pendingImages.isNotEmpty() ||
         pendingFileReferences.isNotEmpty()
+    val canSteer = isStreaming && steerEnabled && !interactionSubmitting &&
+        textFieldState.text.isNotBlank() && pendingImages.isEmpty() && pendingFileReferences.isEmpty()
+    LaunchedEffect(steerAcknowledgement) {
+        if (steerAcknowledgement != null && textFieldState.text.toString().trim() == steerAcknowledgement.text) {
+            textFieldState.clearText()
+        }
+    }
     val density = LocalDensity.current
     val statusBarTopPx = WindowInsets.statusBars.getTop(density)
     var inputContainerTopPx by remember { mutableIntStateOf(0) }
@@ -261,7 +272,7 @@ internal fun AgentChatInputBar(
                 ) {
                     if (textFieldState.text.isBlank()) {
                         Text(
-                            text = if (isStreaming) stringResource(R.string.chat_eta_working) else stringResource(R.string.chat_input_hint),
+                            text = if (isStreaming && steerEnabled) stringResource(R.string.chat_steer_hint) else if (isStreaming) stringResource(R.string.chat_eta_working) else stringResource(R.string.chat_input_hint),
                             style = MiuixTheme.textStyles.body1,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
@@ -334,7 +345,7 @@ internal fun AgentChatInputBar(
                             Spacer(modifier = Modifier.width(2.dp))
                         }
 
-                        SpeechDictationButton(dictation, enabled = !isStreaming)
+                        SpeechDictationButton(dictation, enabled = !isStreaming || steerEnabled)
 
                         Spacer(modifier = Modifier.width(2.dp))
 
@@ -346,6 +357,17 @@ internal fun AgentChatInputBar(
                             onModelSelected = onModelSelected,
                         )
 
+                        if (isStreaming && steerEnabled) {
+                            IconButton(
+                                onClick = { if (canSteer) { dictation.cancel(); onSubmit(textFieldState.text.toString()) } },
+                                enabled = canSteer,
+                                minWidth = ChatInputActionSize, minHeight = ChatInputActionSize,
+                            ) {
+                                Icon(Icons.Rounded.ArrowUpward, stringResource(R.string.chat_steer_send),
+                                    modifier = Modifier.size(ChatInputActionIconSize),
+                                    tint = if (canSteer) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                            }
+                        }
                         IconButton(
                             onClick = if (isStreaming) {
                                 onStop

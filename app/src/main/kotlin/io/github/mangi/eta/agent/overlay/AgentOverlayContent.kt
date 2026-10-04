@@ -46,6 +46,8 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.runtime.Composable
+import io.github.mangi.eta.agent.runtime.AgentUserInputAnswer
+import io.github.mangi.eta.ui.components.AgentClarificationCard
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -283,7 +285,9 @@ internal fun AgentOverlayBubble(
     onResume: () -> Unit,
     onStop: () -> Unit,
     onSupplementModeChange: (Boolean) -> Unit,
-    onSupplement: (String) -> Unit,
+    onSupplement: (String) -> Boolean,
+    steerEnabled: Boolean,
+    onAnswerUserInput: (AgentUserInputAnswer) -> Unit,
 ) {
     var visible by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -324,14 +328,20 @@ internal fun AgentOverlayBubble(
         keyboard?.hide()
         scope.launch {
             delay(80)
-            exitSupplementMode()
-            onSupplement(text)
+            if (onSupplement(text)) exitSupplementMode()
         }
     }
 
     val accent = phaseAccent(state.phase)
     val statusText = state.status.localizedText()
-    val dotAlpha = rememberStatusDotPulse(active = state.phase == AgentOverlayPhase.RUNNING)
+    val dotAlpha = rememberStatusDotPulse(active = state.phase == AgentOverlayPhase.RUNNING && state.pendingUserInput == null)
+    LaunchedEffect(state.pendingUserInput?.id) {
+        if (state.pendingUserInput != null) {
+            onSupplementModeChange(true)
+        } else if (!supplementMode) {
+            onSupplementModeChange(false)
+        }
+    }
 
     AnimatedVisibility(
         visible = visible,
@@ -351,7 +361,7 @@ internal fun AgentOverlayBubble(
     ) {
         Card(
             modifier = Modifier
-                .widthIn(max = 136.dp),
+                .widthIn(max = if (state.pendingUserInput != null) 320.dp else 136.dp),
             cornerRadius = 16.dp,
             insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
             colors = CardDefaults.defaultColors(
@@ -380,6 +390,10 @@ internal fun AgentOverlayBubble(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
+            state.pendingUserInput?.let { request ->
+                AgentClarificationCard(request, false, onAnswerUserInput)
+                Spacer(modifier = Modifier.height(10.dp))
+            }
 
             AnimatedVisibility(
                 visible = supplementMode,
@@ -424,7 +438,7 @@ internal fun AgentOverlayBubble(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                 ) {
-                    OverlayControlButton(
+                    if (steerEnabled) OverlayControlButton(
                         onClick = ::enterSupplementMode,
                         icon = Icons.Rounded.Edit,
                         contentDescription = stringResource(R.string.overlay_supplement),
