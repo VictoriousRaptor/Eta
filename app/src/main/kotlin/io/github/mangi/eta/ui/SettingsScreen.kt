@@ -424,7 +424,10 @@ private fun SettingsPageContent(
                     EtaArrowPreference(
                         title = stringResource(R.string.ui_linux_tool_environment_314d22),
                         startAction = {
-                            EtaPreferenceIcon(Icons.Rounded.Inventory2, tint = EtaPreferenceColors.Orange)
+                            EtaPreferenceIcon(
+                                icon = Icons.Rounded.Inventory2,
+                                tint = EtaPreferenceColors.Orange,
+                            )
                         },
                         onClick = { onNavigate(AppRoute.LinuxEnvironment) },
                     )
