@@ -50,6 +50,8 @@ import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.core.ModuleConfig
 import io.github.mangi.eta.core.safeLogType
 import io.github.mangi.eta.data.repository.RuntimeConfigRepository
+import io.github.mangi.eta.ui.app.EtaUiVisibility
+import io.github.mangi.eta.ui.app.EtaUiVisibilityListener
 import kotlin.concurrent.thread
 import kotlinx.coroutines.runBlocking
 import top.yukonga.miuix.kmp.squircle.LocalSquircleEnabled
@@ -105,6 +107,10 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     @Volatile
     private var lastCompletedRunContext: CompletedRunContext? = null
     private val hideToken = Any()
+    private var overlayRequested = false
+    private val uiVisibilityListener = EtaUiVisibilityListener { isVisible ->
+        mainHandler.post { handleAppVisibilityChanged(isVisible) }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -112,6 +118,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        EtaUiVisibility.addListener(uiVisibilityListener)
     }
 
     override fun onBind(intent: Intent): IBinder? {
@@ -136,6 +143,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     override fun onDestroy() {
+        EtaUiVisibility.removeListener(uiVisibilityListener)
         startRequestGeneration++
         pendingStartRequest?.let { pending ->
             pending.incoming.close()
@@ -366,6 +374,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         state.value = AgentOverlayState.Initial
         collapsed.value = true
         hasExecutedForegroundTool = false
+        overlayRequested = false
         synchronized(supplementsLock) {
             activeSupplements.clear()
             nextSupplementIndex = 1
@@ -441,19 +450,26 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             if (session.isTerminal) return@post
             runCatching {
                 state.value = state.value.applyEvent(event)
+                val appVisible = EtaUiVisibility.isVisible
                 if (event is AgentEvent.UserInputRequested && entrySurfaceReady) {
-                    collapsed.value = false
-                    ensureOverlayVisible()
-                    windowManager?.let(::showBubble)
+                    overlayRequested = true
+                    if (!appVisible) {
+                        collapsed.value = false
+                        ensureOverlayVisible()
+                        windowManager?.let(::showBubble)
+                    }
                 }
                 if (revealsForegroundOperation && entrySurfaceReady) {
-                    if (orbView == null) {
-                        AgentHapticFeedback.perform(
-                            this,
-                            AgentHapticFeedback.Type.RUN_STARTED,
-                        )
+                    overlayRequested = true
+                    if (AgentOverlayVisibilityPolicy.shouldRevealFor(event, appVisible)) {
+                        if (orbView == null) {
+                            AgentHapticFeedback.perform(
+                                this,
+                                AgentHapticFeedback.Type.RUN_STARTED,
+                            )
+                        }
+                        ensureOverlayVisible()
                     }
-                    ensureOverlayVisible()
                 }
             }.onFailure { throwable ->
                 AndroidAgentLogger.warnThrottled("runtime_overlay_event_failed") {
@@ -835,6 +851,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun showOverlay() {
+        if (EtaUiVisibility.isVisible) return
         if (orbView != null) return
         // TYPE_ACCESSIBILITY_OVERLAY 免 SYSTEM_ALERT_WINDOW 权限；仅回退态（无障碍未启用）才需检查
         if (AgentAccessibilityService.current() == null && !Settings.canDrawOverlays(this)) return
@@ -846,7 +863,11 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             AgentOverlayGlow(state = state.value)
         }
         val glowLp = glowLayoutParams()
-        runCatching { wm.addView(glow, glowLp) }.onFailure { throwable ->
+        runCatching {
+            if (!EtaUiVisibility.isVisible) {
+                wm.addView(glow, glowLp)
+            }
+        }.onFailure { throwable ->
             AndroidAgentLogger.warnThrottled("runtime_glow_add_view_failed") {
                 "Agent runtime glow addView failed: type=${throwable.safeLogType()}"
             }
@@ -862,7 +883,11 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             )
         }
         val orbLp = orbLayoutParams()
-        runCatching { wm.addView(orb, orbLp) }.onFailure { throwable ->
+        runCatching {
+            if (!EtaUiVisibility.isVisible) {
+                wm.addView(orb, orbLp)
+            }
+        }.onFailure { throwable ->
             AndroidAgentLogger.warnThrottled("runtime_orb_add_view_failed") {
                 "Agent runtime orb addView failed: type=${throwable.safeLogType()}"
             }
@@ -891,6 +916,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun showBubble(wm: WindowManager) {
+        if (EtaUiVisibility.isVisible) return
         if (bubbleView != null) return
         val bubble = createOverlayComposeView {
             AgentOverlayBubble(
@@ -911,7 +937,11 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             )
         }
         val lp = bubbleLayoutParams()
-        runCatching { wm.addView(bubble, lp) }.onFailure { throwable ->
+        runCatching {
+            if (!EtaUiVisibility.isVisible) {
+                wm.addView(bubble, lp)
+            }
+        }.onFailure { throwable ->
             AndroidAgentLogger.warnThrottled("runtime_bubble_add_view_failed") {
                 "Agent runtime bubble addView failed: type=${throwable.safeLogType()}"
             }
@@ -922,6 +952,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun showResultCard(wm: WindowManager) {
+        if (EtaUiVisibility.isVisible) return
         if (resultCardView != null) return
         val card = createOverlayComposeView {
             AgentResultCard(
@@ -930,7 +961,11 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             )
         }
         val lp = resultCardLayoutParams()
-        runCatching { wm.addView(card, lp) }.onFailure { throwable ->
+        runCatching {
+            if (!EtaUiVisibility.isVisible) {
+                wm.addView(card, lp)
+            }
+        }.onFailure { throwable ->
             AndroidAgentLogger.warnThrottled("runtime_result_card_add_view_failed") {
                 "Agent runtime result card addView failed: type=${throwable.safeLogType()}"
             }
@@ -1085,7 +1120,14 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     private fun enterFinalState(finalState: AgentOverlayState, keepVisible: Boolean = false) {
         state.value = finalState
 
-        if (hasExecutedForegroundTool) {
+        val appVisible = EtaUiVisibility.isVisible
+        if (appVisible) {
+            overlayRequested = false
+            dismissAndStop()
+            return
+        }
+
+        if (AgentOverlayVisibilityPolicy.shouldShowResultCard(hasExecutedForegroundTool, appVisible = false)) {
             // 撤掉光球和小气泡，改显半屏结果卡片，不自动关闭，用户手动关闭
             collapsed.value = true
             removeAmbientWindows()
@@ -1093,6 +1135,54 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             mainHandler.removeCallbacksAndMessages(hideToken)
         } else {
             dismissAndStop()
+        }
+    }
+
+    private fun removeOverlayWindowsForForeground() {
+        resultCardView?.let { view -> runCatching { windowManager?.removeView(view) } }
+        bubbleView?.let { view -> runCatching { windowManager?.removeView(view) } }
+        orbView?.let { view -> runCatching { windowManager?.removeView(view) } }
+        glowView?.let { view -> runCatching { windowManager?.removeView(view) } }
+        resultCardView = null
+        bubbleView = null
+        orbView = null
+        glowView = null
+        resultCardParams = null
+        bubbleParams = null
+        orbParams = null
+        glowParams = null
+    }
+
+    private fun handleAppVisibilityChanged(isVisible: Boolean) {
+        if (isVisible) {
+            val session = activeSession
+            val hasActiveSession = session != null && !session.isTerminal
+            val isTerminalPhase = state.value.phase == AgentOverlayPhase.FINISHED ||
+                state.value.phase == AgentOverlayPhase.FAILED
+            if (!hasActiveSession && isTerminalPhase) {
+                overlayRequested = false
+                dismissAndStop()
+            } else {
+                removeOverlayWindowsForForeground()
+            }
+        } else {
+            val session = activeSession
+            val activeRun = session != null && !session.isTerminal
+            val shouldRestore = AgentOverlayVisibilityPolicy.shouldRestoreFor(
+                activeRun = activeRun,
+                overlayRequested = overlayRequested,
+                appVisible = false,
+            )
+            if (shouldRestore) {
+                if (state.value.pendingUserInput != null) {
+                    collapsed.value = false
+                    ensureOverlayVisible()
+                    windowManager?.let(::showBubble)
+                    setBubbleInputMode(true)
+                } else {
+                    ensureOverlayVisible()
+                }
+            }
         }
     }
 

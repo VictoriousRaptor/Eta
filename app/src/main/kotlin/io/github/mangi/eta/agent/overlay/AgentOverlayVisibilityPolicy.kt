@@ -11,19 +11,50 @@ import io.github.mangi.eta.agent.runtime.AgentEvent
  * interface, and questions that require an answer before execution can continue.
  */
 internal object AgentOverlayVisibilityPolicy {
-    fun shouldRevealFor(event: AgentEvent): Boolean = when (event) {
-        is AgentEvent.UserInputRequested -> true
-        is AgentEvent.AssistantBlockStart ->
-            event.kind == AgentEvent.AssistantBlockKind.TOOL_CALL &&
-                event.name.isForegroundDrivingTool()
-        is AgentEvent.AssistantBlockEnd ->
-            event.kind == AgentEvent.AssistantBlockKind.TOOL_CALL &&
-                event.name.isForegroundDrivingTool()
-        is AgentEvent.AssistantReceived -> event.toolNames.any { it.isForegroundDrivingTool() }
-        is AgentEvent.ToolStarted -> event.name.isForegroundDrivingTool()
-        is AgentEvent.ToolFinished -> event.name.isForegroundOperationTool()
-        is AgentEvent.ToolImagesAttached -> event.toolName.isForegroundOperationTool()
-        else -> false
+    fun shouldRevealFor(event: AgentEvent, appVisible: Boolean = false): Boolean {
+        if (appVisible) return false
+        return when (event) {
+            is AgentEvent.UserInputRequested -> true
+            is AgentEvent.AssistantBlockStart ->
+                event.kind == AgentEvent.AssistantBlockKind.TOOL_CALL &&
+                    event.name.isForegroundDrivingTool()
+            is AgentEvent.AssistantBlockEnd ->
+                event.kind == AgentEvent.AssistantBlockKind.TOOL_CALL &&
+                    event.name.isForegroundDrivingTool()
+            is AgentEvent.AssistantReceived -> event.toolNames.any { it.isForegroundDrivingTool() }
+            is AgentEvent.ToolStarted -> event.name.isForegroundDrivingTool()
+            is AgentEvent.ToolFinished -> event.name.isForegroundOperationTool()
+            is AgentEvent.ToolImagesAttached -> event.toolName.isForegroundOperationTool()
+            else -> false
+        }
+    }
+
+    /**
+     * 判断离开前台切到后台时，是否应为当前运行恢复悬浮窗。
+     *
+     * @param activeRun 当前运行是否仍在进行（非终态）
+     * @param overlayRequested 本次运行是否有事件曾请求过展示悬浮窗
+     * @param appVisible 应用当前是否在前台可见
+     */
+    fun shouldRestoreFor(
+        activeRun: Boolean,
+        overlayRequested: Boolean,
+        appVisible: Boolean,
+    ): Boolean {
+        if (appVisible) return false
+        if (!activeRun) return false
+        return overlayRequested
+    }
+
+    /**
+     * 判断是否应展示终态结果卡片。若 App 处于前台，则不显示。
+     */
+    fun shouldShowResultCard(
+        hasExecutedForegroundTool: Boolean,
+        appVisible: Boolean = false,
+    ): Boolean {
+        if (appVisible) return false
+        return hasExecutedForegroundTool
     }
 
     fun shouldDismissEntrySurfaceFor(event: AgentEvent): Boolean = when (event) {

@@ -1314,6 +1314,9 @@
     <string name="settings_clarify">不确定时问我</string>
     <string name="settings_clarify_summary">缺少只有你能给的关键信息时，Eta 会停下来问几个短问题，拿到回答后继续这一轮。对新任务生效。</string>
     <string name="clarify_waiting">等待你的回答</string>
+    <string name="clarify_question_progress">%1$d/%2$d</string>
+    <string name="clarify_previous">上一题</string>
+    <string name="clarify_next">下一题</string>
     <string name="clarify_free_text">输入你的回答</string>
     <string name="clarify_submit">回答并继续</string>
     <string name="interaction_rejected">当前任务未确认接收，已保留输入。</string>

@@ -36,6 +36,7 @@ import io.github.mangi.eta.agent.roleplay.RoleplayMessageState
 import io.github.mangi.eta.data.repository.CharacterRepository
 import io.github.mangi.eta.agent.runtime.AgentEvent
 import io.github.mangi.eta.agent.runtime.AgentUserInputAnswer
+import io.github.mangi.eta.agent.runtime.AgentUserInputDisplay
 import io.github.mangi.eta.ui.model.SteerAcknowledgement
 import io.github.mangi.eta.agent.runtime.AgentExecutionService
 import io.github.mangi.eta.agent.runtime.AgentExternalArchivePayload
@@ -2141,10 +2142,7 @@ internal class AgentAppState(
                 val conversationId = conversationIdForRun(runId) ?: return
                 val state = conversationsById[conversationId] ?: return
                 val id = "clarification-answer-$runId-${event.answer.requestId}"
-                val questions = state.pendingUserInput?.takeIf { it.id == event.answer.requestId }?.questions
-                val answerText = if (questions != null) questions.joinToString("\n\n") {
-                    "${it.question}\n${event.answer.answers[it.id].orEmpty()}"
-                } else event.answer.answers.entries.joinToString("\n\n") { "${it.key}: ${it.value}" }
+                val answerText = AgentUserInputDisplay.formatAnswer(event.answer, state.pendingUserInput)
                 updateConversation(conversationId, state.copy(
                     pendingUserInput = state.pendingUserInput.takeUnless { it?.id == event.answer.requestId },
                     interactionSubmitting = false,

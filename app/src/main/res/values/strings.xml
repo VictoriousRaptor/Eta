@@ -1336,6 +1336,9 @@
     <string name="settings_clarify">Ask when uncertain</string>
     <string name="settings_clarify_summary">When key information is missing, Eta asks a few short questions and continues the same task after you answer. Applies to new tasks.</string>
     <string name="clarify_waiting">Waiting for your answer</string>
+    <string name="clarify_question_progress">%1$d/%2$d</string>
+    <string name="clarify_previous">Previous</string>
+    <string name="clarify_next">Next</string>
     <string name="clarify_free_text">Type your answer</string>
     <string name="clarify_submit">Answer and continue</string>
     <string name="interaction_rejected">The task could not accept this input. Your draft has been kept.</string>

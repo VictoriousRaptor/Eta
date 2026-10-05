@@ -52,6 +52,8 @@ import io.github.mangi.eta.agent.runtime.AgentEvent
 import io.github.mangi.eta.agent.runtime.AgentExternalArchivePayload
 import io.github.mangi.eta.agent.runtime.AgentRuntimeClient
 import io.github.mangi.eta.agent.runtime.AgentRuntimeWire
+import io.github.mangi.eta.agent.runtime.AgentUserInputDisplay
+import io.github.mangi.eta.agent.runtime.AgentUserInputRequest
 import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.data.model.AppearanceSettings
 import io.github.mangi.eta.data.repository.AppearanceSettingsRepository
@@ -140,6 +142,7 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
     private var inputText by mutableStateOf("")
     private var inputFocusRequestKey by mutableIntStateOf(-1)
     private var uiState by mutableStateOf(EtaVoiceUiState())
+    private var pendingUserInputRequest: AgentUserInputRequest? = null
 
     override val lifecycle: Lifecycle get() = lifecycleRegistry
     override val savedStateRegistry: SavedStateRegistry
@@ -409,6 +412,7 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
         playback.stop()
         val capture = entryScreenContext
         inputText = ""
+        pendingUserInputRequest = null
         activeRunId = UUID.randomUUID().toString()
         val runId = activeRunId ?: return
         uiState = uiState.copy(
@@ -618,6 +622,7 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
             }
 
             is AgentEvent.UserInputRequested -> {
+                pendingUserInputRequest = event.request
                 val id = "clarification-$runId-${event.request.id}"
                 if (messages.none { it.id == id }) {
                     messages = messages + AgentMessageUi(id, event.request.questions.joinToString("\n\n") { it.question })
@@ -627,7 +632,14 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
             is AgentEvent.UserInputAnswered -> {
                 val id = "clarification-answer-$runId-${event.answer.requestId}"
                 if (messages.none { it.id == id }) {
-                    messages = messages + UserMessageUi(id, event.answer.answers.values.joinToString("\n\n"))
+                    val content = AgentUserInputDisplay.formatAnswer(
+                        event.answer,
+                        pendingUserInputRequest?.takeIf { it.id == event.answer.requestId },
+                    )
+                    messages = messages + UserMessageUi(id, content)
+                }
+                if (pendingUserInputRequest?.id == event.answer.requestId) {
+                    pendingUserInputRequest = null
                 }
             }
 
