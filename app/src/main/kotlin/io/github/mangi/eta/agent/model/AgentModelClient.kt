@@ -152,6 +152,7 @@ internal object AgentModelClient {
                 memoryWritable = roleplayContext == null,
                 clarifyEnabled = conversationConfig.clarifyEnabled,
                 capabilities = capabilities,
+                localWebSearch = !config.usesHostedWebSearch,
             )
             for (index in 0 until additionalTools.length()) {
                 tools.put(additionalTools.opt(index))
@@ -287,6 +288,10 @@ internal object AgentModelClient {
         val autoCompactionEnabled: Boolean = Prefs.Keys.BOOLEAN_DEFAULTS.getValue(Prefs.Keys.AGENT_AUTO_COMPACTION_ENABLED),
         val clarifyEnabled: Boolean = true,
     ) {
+        val usesHostedWebSearch: Boolean
+            get() = hostedWebSearchEnabled && providerType == ProviderTypes.OPENAI_COMPATIBLE &&
+                openAiEndpointMode == OpenAiEndpointMode.RESPONSES
+
         val effectiveReasoningEffort: ReasoningEffort
             get() = reasoningEffort ?: ReasoningEffort.fromLegacy(thinkingEnabled)
 
