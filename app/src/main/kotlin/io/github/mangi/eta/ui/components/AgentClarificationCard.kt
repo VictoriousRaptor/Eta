@@ -2,6 +2,7 @@ package io.github.mangi.eta.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -26,11 +27,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.runtime.AgentUserInputAnswer
 import io.github.mangi.eta.agent.runtime.AgentUserInputRequest
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -48,13 +51,41 @@ internal fun AgentClarificationCard(
         restore = { items -> items.chunked(2).associate { it[0] to it[1] } },
     )) { mutableStateOf(emptyMap()) }
 
+    var selectedOptions by rememberSaveable(request.id, stateSaver = listSaver<Map<String, Set<String>>, String>(
+        save = { map ->
+            val result = mutableListOf<String>()
+            for ((key, set) in map) {
+                result.add(key)
+                result.add(set.size.toString())
+                result.addAll(set)
+            }
+            result
+        },
+        restore = { items ->
+            val result = mutableMapOf<String, Set<String>>()
+            var i = 0
+            while (i < items.size) {
+                val key = items[i]
+                val size = items.getOrNull(i + 1)?.toIntOrNull() ?: 0
+                val set = mutableSetOf<String>()
+                for (j in 0 until size) {
+                    items.getOrNull(i + 2 + j)?.let { set.add(it) }
+                }
+                result[key] = set
+                i += 2 + size
+            }
+            result
+        },
+    )) { mutableStateOf(emptyMap()) }
+
     var currentPageIndex by rememberSaveable(request.id) { mutableIntStateOf(0) }
 
-    val pagerState = remember(request, currentPageIndex, answers) {
+    val pagerState = remember(request, currentPageIndex, answers, selectedOptions) {
         AgentClarificationPagerState(
             request = request,
             currentPageIndex = currentPageIndex,
             answers = answers,
+            selectedOptions = selectedOptions,
         )
     }
 
@@ -104,18 +135,66 @@ internal fun AgentClarificationCard(
                     .verticalScroll(scrollState),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    text = currentQuestion.question,
-                    style = MiuixTheme.textStyles.body1,
-                    color = MiuixTheme.colorScheme.onSurface,
-                )
-                currentQuestion.options.forEach { option ->
-                    TextButton(
-                        text = option,
-                        enabled = !submitting,
-                        onClick = { answers = answers + (currentQuestion.id to option) },
-                        modifier = Modifier.fillMaxWidth(),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = currentQuestion.question,
+                        style = MiuixTheme.textStyles.body1,
+                        color = MiuixTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
+                    if (currentQuestion.multiSelect) {
+                        Text(
+                            text = stringResource(R.string.clarify_multi_select),
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                if (currentQuestion.multiSelect) {
+                    val currentSet = selectedOptions[currentQuestion.id].orEmpty()
+                    currentQuestion.options.forEach { option ->
+                        val isSelected = option in currentSet
+                        val borderColor = if (isSelected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.outline
+                        val backgroundColor = if (isSelected) MiuixTheme.colorScheme.primary.copy(alpha = 0.08f) else MiuixTheme.colorScheme.surface
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(backgroundColor, RoundedCornerShape(8.dp))
+                                .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+                                .clickable(enabled = !submitting) {
+                                    val updated = if (isSelected) currentSet - option else currentSet + option
+                                    selectedOptions = selectedOptions + (currentQuestion.id to updated)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Checkbox(
+                                state = if (isSelected) ToggleableState.On else ToggleableState.Off,
+                                onClick = null,
+                                enabled = !submitting,
+                            )
+                            Text(
+                                text = option,
+                                style = MiuixTheme.textStyles.body1,
+                                color = MiuixTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                } else {
+                    currentQuestion.options.forEach { option ->
+                        TextButton(
+                            text = option,
+                            enabled = !submitting,
+                            onClick = { answers = answers + (currentQuestion.id to option) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
                 val currentValue = answers[currentQuestion.id].orEmpty()
                 BasicTextField(

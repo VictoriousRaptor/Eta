@@ -1332,6 +1332,7 @@
     <string name="clarify_previous">上一题</string>
     <string name="clarify_next">下一题</string>
     <string name="clarify_free_text">输入你的回答</string>
+    <string name="clarify_multi_select">多选</string>
     <string name="clarify_submit">回答并继续</string>
     <string name="interaction_rejected">当前任务未确认接收，已保留输入。</string>
     <string name="chat_steer_hint">补充这次任务的要求</string>

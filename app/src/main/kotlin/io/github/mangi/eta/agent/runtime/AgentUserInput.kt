@@ -9,6 +9,7 @@ data class AgentUserInputQuestion(
     val id: String,
     val question: String,
     val options: List<String> = emptyList(),
+    val multiSelect: Boolean = false,
 )
 
 @Serializable
@@ -28,12 +29,14 @@ data class AgentUserInputRequest(
             val questions = (0 until items.length()).map { index ->
                 val item = items.getJSONObject(index)
                 val options = item.optJSONArray("options")
+                val multiSelect = item.optBoolean("multiSelect", false)
                 AgentUserInputQuestion(
                     id = item.getString("id"),
                     question = item.getString("question"),
                     options = options?.let { array ->
                         (0 until array.length()).map { array.getString(it) }
                     }.orEmpty(),
+                    multiSelect = multiSelect,
                 ).also { question ->
                     require(question.id.matches(Regex("[a-zA-Z0-9_-]{1,64}")))
                     require(question.question.isNotBlank() && question.question.length <= 500)

@@ -1354,6 +1354,7 @@
     <string name="clarify_previous">Previous</string>
     <string name="clarify_next">Next</string>
     <string name="clarify_free_text">Type your answer</string>
+    <string name="clarify_multi_select">Multiple choice</string>
     <string name="clarify_submit">Answer and continue</string>
     <string name="interaction_rejected">The task could not accept this input. Your draft has been kept.</string>
     <string name="chat_steer_hint">Add an instruction to this task</string>

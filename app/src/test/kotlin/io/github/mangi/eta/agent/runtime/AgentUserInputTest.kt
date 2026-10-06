@@ -103,4 +103,42 @@ class AgentUserInputTest {
             AgentUserInputRequest.fromToolArguments("r", """{"questions":[{"id":"x","question":" "}]}""")
         }
     }
+
+    @Test
+    fun toolArgumentsParseDefaultAndExplicitMultiSelect() {
+        val rawDefault = """{"questions":[{"id":"q1","question":"去哪里？","options":["北京","上海"]}]}"""
+        val parsedDefault = AgentUserInputRequest.fromToolArguments("req-def", rawDefault)
+        assertEquals(1, parsedDefault.questions.size)
+        assertFalse(parsedDefault.questions[0].multiSelect)
+
+        val rawExplicitTrue = """{"questions":[{"id":"q1","question":"偏好？","options":["静音","靠窗"],"multiSelect":true}]}"""
+        val parsedExplicitTrue = AgentUserInputRequest.fromToolArguments("req-true", rawExplicitTrue)
+        assertTrue(parsedExplicitTrue.questions[0].multiSelect)
+
+        val rawExplicitFalse = """{"questions":[{"id":"q1","question":"单选偏好？","options":["A","B"],"multiSelect":false}]}"""
+        val parsedExplicitFalse = AgentUserInputRequest.fromToolArguments("req-false", rawExplicitFalse)
+        assertFalse(parsedExplicitFalse.questions[0].multiSelect)
+    }
+
+    @Test
+    fun codecPreservesMultiSelectFlag() {
+        val multiRequest = AgentUserInputRequest("multi-req", listOf(
+            AgentUserInputQuestion("diet", "饮食偏好？", listOf("无辣", "素食", "清淡"), multiSelect = true),
+            AgentUserInputQuestion("seat", "座位偏好？", listOf("靠窗", "过道"), multiSelect = false),
+        ))
+        val encoded = AgentUserInputCodec.encode(multiRequest)
+        val decoded = AgentUserInputCodec.request(encoded)
+        assertEquals(multiRequest, decoded)
+        assertTrue(decoded.questions[0].multiSelect)
+        assertFalse(decoded.questions[1].multiSelect)
+    }
+
+    @Test
+    fun acceptsAcceptsMultiLineAnswerFromMultiSelect() {
+        val multiRequest = AgentUserInputRequest("multi-req-2", listOf(
+            AgentUserInputQuestion("q1", "选择？", listOf("A", "B", "C"), multiSelect = true),
+        ))
+        val multiLineAnswer = AgentUserInputAnswer("multi-req-2", mapOf("q1" to "A\nB\n附加说明"))
+        assertTrue(multiRequest.accepts(multiLineAnswer))
+    }
 }
