@@ -38,9 +38,10 @@ google-services.json
 # agy run evidence and local-only workflow helpers
 /.agy-runs/
 /.codex/rules/agy.rules
-/artifacts/agy-smoke/
+/artifacts/
 /AGENTS.md
 /.agents/
 /docs/AGY_WORKFLOW.md
 /docs/agy/
 /scripts/agy.ps1
+docs/CLARIFY_STEER_PLAN.md
