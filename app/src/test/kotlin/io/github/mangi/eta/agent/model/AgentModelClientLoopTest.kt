@@ -16,6 +16,88 @@ import org.junit.Test
 
 class AgentModelClientLoopTest {
     @Test
+    fun replyRewriteDoesNotAdvertiseOrInstructClarification() {
+        val provider = ScriptedProvider(listOf({ request, _ ->
+            assertEquals(0, request.tools.length())
+            assertFalse(request.messages.toString().contains("request_user_input"))
+            assistant(content = "改写后的正文", finishReason = "stop")
+        }))
+        val result = AgentModelClient.complete(
+            config = modelConfig(), prompt = "原回复", provider = provider, rewriteReply = true,
+            toolExecutor = AgentModelClient.ToolExecutor { error("Must not execute") },
+        )
+        assertEquals("改写后的正文", result.content)
+    }
+
+    @Test
+    fun clarificationResumesSameRunAndKeepsToolResultsContiguousBeforeSteering() {
+        val controller = AgentRunController()
+        val events = mutableListOf<AgentEvent>()
+        val executed = mutableListOf<String>()
+        val provider = ScriptedProvider(listOf(
+            { request, _ ->
+                assertTrue(request.tools.toString().contains("request_user_input"))
+                assistant(finishReason = "tool_calls", toolCalls = listOf(
+                    toolCall("ask", "request_user_input", """{"questions":[{"id":"city","question":"去哪个城市？","options":["广州","深圳"]},{"id":"date","question":"哪天出发？"}]}"""),
+                    toolCall("next", "get_current_context", "{}"),
+                ))
+            },
+            { request, _ ->
+                val messages = request.messages
+                assertEquals(listOf("assistant", "tool", "tool", "user"), messages.roleSuffix(4))
+                val result = JSONObject(messages.getJSONObjectFromEnd(3).getString("content"))
+                assertEquals("广州", result.getJSONObject("answers").getString("city"))
+                assertEquals("周六", result.getJSONObject("answers").getString("date"))
+                assertTrue(messages.getJSONObjectFromEnd(1).getString("content").contains("不要订票"))
+                assistant(content = "继续完成", finishReason = "stop")
+            },
+        ))
+        val result = AgentModelClient.complete(
+            config = modelConfig(), prompt = "帮我安排旅行", provider = provider, runController = controller,
+            toolExecutor = AgentModelClient.ToolExecutor {
+                executed += it.id
+                AgentModelClient.ToolResult("现在是周五")
+            },
+            onEvent = { event ->
+                events += event
+                if (event is AgentEvent.UserInputRequested) {
+                    assertTrue(executed.isEmpty())
+                    assertTrue(controller.steer("不要订票"))
+                    assertTrue(controller.answerUserInput(io.github.mangi.eta.agent.runtime.AgentUserInputAnswer(
+                        event.request.id, mapOf("city" to "广州", "date" to "周六"),
+                    )))
+                }
+            },
+        )
+        assertEquals("继续完成", result.content)
+        assertEquals(listOf("next"), executed)
+        assertEquals(1, events.filterIsInstance<AgentEvent.UserInputAnswered>().size)
+        assertEquals(listOf("assistant", "tool", "tool", "user", "assistant"), result.transcript.map { it.role })
+    }
+
+    @Test
+    fun disabledClarificationRejectsCallsWithoutWaitingOrExecutingThem() {
+        val provider = ScriptedProvider(listOf(
+            { request, _ ->
+                assertFalse(request.tools.toString().contains("request_user_input"))
+                assertFalse(request.messages.toString().contains("使用 request_user_input"))
+                assistant(finishReason = "tool_calls", toolCalls = listOf(toolCall(
+                    "ask", "request_user_input", """{"questions":[{"id":"x","question":"输入？"}]}""",
+                )))
+            },
+            { request, _ ->
+                assertTrue(request.messages.toString().contains("INVALID_TOOL_ARGUMENTS"))
+                assistant(content = "已禁用", finishReason = "stop")
+            },
+        ))
+        val events = mutableListOf<AgentEvent>()
+        AgentModelClient.complete(config = modelConfig().copy(clarifyEnabled = false), prompt = "开始",
+            provider = provider, onEvent = events::add,
+            toolExecutor = AgentModelClient.ToolExecutor { error("Must not execute") })
+        assertTrue(events.none { it is AgentEvent.UserInputRequested })
+    }
+
+    @Test
     fun hostedSearchReplacesOnlyTheLocalSearchInSupportedConfigurations() {
         for (providerType in listOf(ProviderTypes.OPENAI_COMPATIBLE, ProviderTypes.ANTHROPIC)) {
             for (endpoint in listOf(OpenAiEndpointMode.RESPONSES, OpenAiEndpointMode.CHAT_COMPLETIONS)) {

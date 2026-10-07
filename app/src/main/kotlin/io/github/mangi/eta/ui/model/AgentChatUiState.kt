@@ -3,6 +3,7 @@ package io.github.mangi.eta.ui.model
 import androidx.compose.runtime.Immutable
 import io.github.mangi.eta.agent.model.AgentFileReference
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.runtime.AgentUserInputRequest
 import io.github.mangi.eta.agent.roleplay.RoleplayBinding
 import io.github.mangi.eta.agent.roleplay.RoleplayMessageState
 import io.github.mangi.eta.data.model.ReasoningEffort
@@ -25,6 +26,9 @@ internal data class AgentChatUiState(
     val messageEdit: MessageEditUiState? = null,
     val roleplay: RoleplayBinding? = null,
     val roleplayMessages: RoleplayMessageState = RoleplayMessageState(),
+    val pendingUserInput: AgentUserInputRequest? = null,
+    val interactionSubmitting: Boolean = false,
+    val steerAcknowledgement: SteerAcknowledgement? = null,
     /** 会话最近一次发送使用的本地 Model.id；null 表示尚未绑定，跟随默认模型。 */
     val modelId: String? = null,
 ) {
@@ -32,6 +36,8 @@ internal data class AgentChatUiState(
         !it.contextSummary && (it.role == "assistant" || it.role == "tool")
     }
 }
+
+internal data class SteerAcknowledgement(val text: String, val sequence: Long)
 
 @Immutable
 sealed interface AgentChatMessageUi {

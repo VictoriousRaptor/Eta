@@ -15,6 +15,7 @@ internal object AgentToolCatalog {
         skillGitHubInstall: Boolean = false,
         memoryTools: Boolean = false,
         memoryWritable: Boolean = true,
+        clarifyEnabled: Boolean = false,
         capabilities: AgentToolCapabilities = AgentToolCapabilities(rootAvailable = true),
         localWebSearch: Boolean = true,
     ): JSONArray =
@@ -22,6 +23,7 @@ internal object AgentToolCatalog {
             AgentContextAppToolCatalog.appendTo(tools)
             AgentGestureToolCatalog.appendTo(tools)
             AgentTextSystemToolCatalog.appendTo(tools)
+            if (clarifyEnabled) AgentInteractionToolCatalog.appendTo(tools)
             AgentDeviceToolCatalog.appendTo(
                 tools,
                 directTools = deviceDirectTools,

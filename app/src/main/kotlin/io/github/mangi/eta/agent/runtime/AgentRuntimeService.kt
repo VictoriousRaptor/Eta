@@ -12,6 +12,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.os.Handler
+import android.os.Bundle
 import android.os.IBinder
 import android.os.Looper
 import android.os.Message
@@ -55,6 +56,8 @@ import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.core.ModuleConfig
 import io.github.mangi.eta.core.safeLogType
 import io.github.mangi.eta.data.repository.RuntimeConfigRepository
+import io.github.mangi.eta.ui.app.EtaUiVisibility
+import io.github.mangi.eta.ui.app.EtaUiVisibilityListener
 import kotlin.concurrent.thread
 import kotlinx.coroutines.runBlocking
 import top.yukonga.miuix.kmp.squircle.LocalSquircleEnabled
@@ -123,6 +126,10 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     @Volatile
     private var lastCompletedRunContext: CompletedRunContext? = null
     private val hideToken = Any()
+    private var overlayRequested = false
+    private val uiVisibilityListener = EtaUiVisibilityListener { isVisible ->
+        mainHandler.post { handleAppVisibilityChanged(isVisible) }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -130,6 +137,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        EtaUiVisibility.addListener(uiVisibilityListener)
     }
 
     override fun onBind(intent: Intent): IBinder? {
@@ -154,6 +162,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     override fun onDestroy() {
+        EtaUiVisibility.removeListener(uiVisibilityListener)
         startRequestGeneration++
         pendingStartRequest?.let { pending ->
             pending.incoming.close()
@@ -224,6 +233,23 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                 AgentRuntimeWire.MSG_CANCEL -> {
                     val runId = msg.data?.let(AgentRuntimeWire::runIdFromBundle).orEmpty()
                     if (runId.isNotBlank()) cancelRun(runId)
+                }
+
+                AgentRuntimeWire.MSG_STEER,
+                AgentRuntimeWire.MSG_ANSWER_USER_INPUT -> {
+                    val runId = AgentRuntimeWire.runIdFromBundle(msg.data)
+                    val payload = msg.data.getString("payload").orEmpty()
+                    val accepted = payload.length <= 32000 && if (msg.what == AgentRuntimeWire.MSG_STEER) {
+                        requestSupplement(payload, expectedRunId = runId)
+                    } else {
+                        val answer = runCatching { AgentUserInputCodec.answer(payload) }.getOrNull()
+                        answer != null && activeSession?.takeIf { it.runId == runId }?.answerUserInput(answer) == true
+                    }
+                    runCatching {
+                        msg.replyTo?.send(Message.obtain(null, AgentRuntimeWire.MSG_CONTROL_RESPONSE).apply {
+                            data = Bundle().apply { putBoolean("accepted", accepted) }
+                        })
+                    }
                 }
 
                 AgentRuntimeWire.MSG_ACK_RESULT -> {
@@ -366,6 +392,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         capsuleExpanded.value = false
         setCapsuleWindowHeight(CAPSULE_COLLAPSED_HEIGHT_DP)
         hasExecutedForegroundTool = false
+        overlayRequested = false
         resultConversationId = request.handoff
             ?.takeIf { it.source == AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE }
             ?.let { AgentUiHandoffPayload.from(it.payload).conversationId }
@@ -446,14 +473,30 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             if (session.isTerminal) return@post
             runCatching {
                 state.value = state.value.applyEvent(event)
-                if (revealsForegroundOperation && entrySurfaceReady) {
-                    if (capsuleView == null) {
-                        AgentHapticFeedback.perform(
-                            this,
-                            AgentHapticFeedback.Type.RUN_STARTED,
-                        )
+                val appVisible = EtaUiVisibility.isVisible
+                if (event is AgentEvent.UserInputRequested && entrySurfaceReady) {
+                    overlayRequested = true
+                    if (!appVisible) {
+                        capsuleExpanded.value = true
+                        ensureOverlayVisible()
+                        setCapsuleInputMode(true)
                     }
-                    ensureOverlayVisible()
+                } else if (event is AgentEvent.UserInputAnswered && entrySurfaceReady) {
+                    if (!appVisible) {
+                        setCapsuleInputMode(false)
+                    }
+                }
+                if (revealsForegroundOperation && entrySurfaceReady) {
+                    overlayRequested = true
+                    if (AgentOverlayVisibilityPolicy.shouldRevealFor(event, appVisible)) {
+                        if (capsuleView == null) {
+                            AgentHapticFeedback.perform(
+                                this,
+                                AgentHapticFeedback.Type.RUN_STARTED,
+                            )
+                        }
+                        ensureOverlayVisible()
+                    }
                 }
             }.onFailure { throwable ->
                 AndroidAgentLogger.warnThrottled("runtime_overlay_event_failed") {
@@ -766,39 +809,48 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         activeSession?.controller?.resume()
         state.value = state.value.copy(
             phase = AgentOverlayPhase.RUNNING,
-            status = AgentOverlayStatus.Continuing,
+            status = if (state.value.pendingUserInput != null) {
+                AgentOverlayStatus.WaitingForUser
+            } else {
+                AgentOverlayStatus.Continuing
+            },
         )
     }
 
-    private fun requestSupplement(text: String) {
+    private fun requestSupplement(text: String, expectedRunId: String? = null): Boolean {
         val supplementText = text.trim()
-        if (supplementText.isBlank()) return
-        setCapsuleInputMode(focusable = false)
+        if (supplementText.isBlank() || supplementText.length > 32000) return false
+        if (expectedRunId != null && activeSession?.runId != expectedRunId) return false
+        if (activeSession?.isTerminal == false && !Prefs.isEnabled(Prefs.Keys.AGENT_STEER_ENABLED)) return false
         activeSession?.let { session ->
             val event = session.steer(supplementText) {
                 recordSupplementEvent(supplementText)
             }
             if (event == null) {
                 if (!session.isTerminal) {
-                    state.value = state.value.copy(
-                        status = AgentOverlayStatus.Finishing,
-                    )
-                    return
+                    val st = state.value.status
+                    if (st != AgentOverlayStatus.WaitingForUser && st != AgentOverlayStatus.Paused) {
+                        state.value = state.value.copy(
+                            status = AgentOverlayStatus.Finishing,
+                        )
+                    }
+                    return false
                 }
             } else {
                 AndroidAgentLogger.info(
                     "Agent runtime supplement received: index=${event.index}, chars=${event.text.length}"
                 )
                 state.value = state.value.applyEvent(event)
-                return
+                return true
             }
         }
 
-        val completed = lastCompletedRunContext ?: return
+        if (expectedRunId != null) return false
+        val completed = lastCompletedRunContext ?: return false
         if (completed.request.operation != AgentRuntimeWire.OP_CHAT ||
             completed.request.handoff?.source != AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE) {
             state.value = state.value.copy(status = AgentOverlayStatus.ContinuationUnavailable)
-            return
+            return false
         }
         val continuationRequest = AgentContinuationBuilder.build(
             request = completed.request,
@@ -806,6 +858,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             supplement = supplementText,
         )
         startRun(continuationRequest)
+        return true
     }
 
     private fun recordSupplementEvent(text: String): AgentEvent.UserSupplementReceived {
@@ -827,6 +880,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun showOverlay() {
+        if (EtaUiVisibility.isVisible) return
         if (capsuleView != null) return
         // TYPE_ACCESSIBILITY_OVERLAY 免 SYSTEM_ALERT_WINDOW 权限；仅回退态（无障碍未启用）才需检查
         if (AgentAccessibilityService.current() == null && !Settings.canDrawOverlays(this)) return
@@ -838,13 +892,19 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             AgentOverlayGlow(state = state.value, corners = screenCornerRadii())
         }
         val glowLp = glowLayoutParams()
-        runCatching { wm.addView(glow, glowLp) }.onFailure { throwable ->
+        var glowAdded = false
+        runCatching {
+            if (!EtaUiVisibility.isVisible) {
+                wm.addView(glow, glowLp)
+                glowView = glow
+                glowParams = glowLp
+                glowAdded = true
+            }
+        }.onFailure { throwable ->
             AndroidAgentLogger.warnThrottled("runtime_glow_add_view_failed") {
                 "Agent runtime glow addView failed: type=${throwable.safeLogType()}"
             }
         }
-        glowView = glow
-        glowParams = glowLp
 
         // ── 状态胶囊窗口：状态栏下方居中，收起时一句状态，点击展开控制 ─────
         val capsule = createOverlayComposeView {
@@ -856,22 +916,54 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                 onPause = ::requestPause,
                 onResume = ::requestResume,
                 onStop = ::requestStop,
-                onSupplementModeChange = ::setCapsuleInputMode,
-                onSupplement = ::requestSupplement,
+                onSupplementModeChange = { focusable -> setCapsuleInputMode(focusable) },
+                onSupplement = { text -> requestSupplement(text) },
+                onAnswerUserInput = { answer ->
+                    val accepted = activeSession?.answerUserInput(answer) == true
+                    if (accepted) {
+                        state.value = state.value.copy(
+                            pendingUserInput = null,
+                            status = if (state.value.phase == AgentOverlayPhase.PAUSED) AgentOverlayStatus.Paused else AgentOverlayStatus.Continuing
+                        )
+                        setCapsuleInputMode(focusable = false)
+                    }
+                    accepted
+                },
             )
         }
         val capsuleLp = capsuleLayoutParams()
-        runCatching { wm.addView(capsule, capsuleLp) }.onFailure { throwable ->
+        var capsuleAdded = false
+        runCatching {
+            if (!EtaUiVisibility.isVisible) {
+                wm.addView(capsule, capsuleLp)
+                capsuleView = capsule
+                capsuleParams = capsuleLp
+                capsuleAdded = true
+            }
+        }.onFailure { throwable ->
             AndroidAgentLogger.warnThrottled("runtime_capsule_add_view_failed") {
                 "Agent runtime capsule addView failed: type=${throwable.safeLogType()}"
             }
+            if (glowAdded) {
+                glowView?.let { runCatching { wm.removeView(it) } }
+                glowView = null
+                glowParams = null
+            }
             return
         }
-        capsuleView = capsule
-        capsuleParams = capsuleLp
+        if (!capsuleAdded) {
+            if (glowAdded) {
+                glowView?.let { runCatching { wm.removeView(it) } }
+                glowView = null
+                glowParams = null
+            }
+            return
+        }
+        setCapsuleInputMode(focusable = false)
     }
 
     private fun toggleCapsule() {
+        if (state.value.pendingUserInput != null) return // 澄清时禁止收起
         val expand = !capsuleExpanded.value
         // 先把窗口扩到展开档再开始动画；收起由胶囊在动画结束后回调 onCollapsedSettled 缩窗。
         if (expand) setCapsuleWindowHeight(CAPSULE_CONTROLS_HEIGHT_DP)
@@ -879,6 +971,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun onCapsuleCollapsedSettled() {
+        if (state.value.pendingUserInput != null) return // 澄清时高度由 pending 优先，不缩窗
         if (!capsuleExpanded.value) setCapsuleWindowHeight(CAPSULE_COLLAPSED_HEIGHT_DP)
     }
 
@@ -886,7 +979,16 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         val wm = windowManager ?: return
         val capsule = capsuleView ?: return
         val lp = capsuleParams ?: return
-        val height = dpToPx(heightDp)
+
+        // 优先考虑澄清状态高度
+        val targetHeightDp = if (state.value.pendingUserInput != null) CAPSULE_CLARIFY_HEIGHT_DP else heightDp
+
+        val heightPx = dpToPx(targetHeightDp)
+        val maxAvailableHeight = runCatching {
+            val metrics = wm.currentWindowMetrics
+            metrics.bounds.height() - statusBarHeightPx() - dpToPx(24)
+        }.getOrDefault(heightPx)
+        val height = minOf(heightPx, maxAvailableHeight).coerceAtLeast(0) // 非负
         if (lp.height == height) return
         lp.height = height
         runCatching { wm.updateViewLayout(capsule, lp) }.onFailure { throwable ->
@@ -897,6 +999,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun showResultCard(wm: WindowManager) {
+        if (EtaUiVisibility.isVisible) return
         if (resultCardView != null) return
         val card = createOverlayComposeView {
             AgentResultCard(
@@ -906,16 +1009,20 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             )
         }
         val lp = resultCardLayoutParams()
-        runCatching { wm.addView(card, lp) }.onFailure { throwable ->
+        runCatching {
+            if (!EtaUiVisibility.isVisible) {
+                wm.addView(card, lp)
+                resultCardView = card
+                resultCardParams = lp
+                registerResultCardBack(card)
+                card.requestFocus()
+            }
+        }.onFailure { throwable ->
             AndroidAgentLogger.warnThrottled("runtime_result_card_add_view_failed") {
                 "Agent runtime result card addView failed: type=${throwable.safeLogType()}"
             }
             return
         }
-        resultCardView = card
-        resultCardParams = lp
-        registerResultCardBack(card)
-        card.requestFocus()
     }
 
     /**
@@ -1002,6 +1109,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             dpToPx(CAPSULE_COLLAPSED_HEIGHT_DP),
             overlayType(),
             WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
@@ -1029,6 +1137,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             resultCardWindowHeightPx(),
             overlayType(),
             WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
@@ -1102,15 +1211,18 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun setCapsuleInputMode(focusable: Boolean) {
+        val clarify = state.value.pendingUserInput != null
+        val effectiveFocusable = focusable || clarify
         setCapsuleWindowHeight(
-            if (focusable) CAPSULE_SUPPLEMENT_HEIGHT_DP
+            if (clarify) CAPSULE_CLARIFY_HEIGHT_DP
+            else if (focusable) CAPSULE_SUPPLEMENT_HEIGHT_DP
             else if (capsuleExpanded.value) CAPSULE_CONTROLS_HEIGHT_DP
             else CAPSULE_COLLAPSED_HEIGHT_DP,
         )
         val wm = windowManager ?: return
         val capsule = capsuleView ?: return
         val lp = capsuleParams ?: return
-        val nextFlags = if (focusable) {
+        val nextFlags = if (effectiveFocusable) {
             lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         } else {
             lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -1131,9 +1243,16 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         (dp * resources.displayMetrics.density).toInt()
 
     private fun enterFinalState(finalState: AgentOverlayState, keepVisible: Boolean = false) {
-        state.value = finalState
+        state.value = finalState.copy(pendingUserInput = null)
 
-        if (hasExecutedForegroundTool) {
+        val appVisible = EtaUiVisibility.isVisible
+        if (appVisible) {
+            overlayRequested = false
+            dismissAndStop()
+            return
+        }
+
+        if (AgentOverlayVisibilityPolicy.shouldShowResultCard(hasExecutedForegroundTool, appVisible = false)) {
             // 撤掉胶囊和边缘光，改显半屏结果卡片，不自动关闭，用户手动关闭
             capsuleExpanded.value = false
             removeAmbientWindows()
@@ -1141,6 +1260,54 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             mainHandler.removeCallbacksAndMessages(hideToken)
         } else {
             dismissAndStop()
+        }
+    }
+
+    private fun removeOverlayWindowsForForeground() {
+        unregisterResultCardBack()
+        resultCardView?.let { view -> runCatching { windowManager?.removeView(view) } }
+        capsuleView?.let { view -> runCatching { windowManager?.removeView(view) } }
+        glowView?.let { view -> runCatching { windowManager?.removeView(view) } }
+        resultCardView = null
+        capsuleView = null
+        glowView = null
+        resultCardParams = null
+        capsuleParams = null
+        glowParams = null
+    }
+
+    private fun handleAppVisibilityChanged(isVisible: Boolean) {
+        if (isVisible) {
+            val session = activeSession
+            val hasActiveSession = session != null && !session.isTerminal
+            val isTerminalPhase = state.value.phase == AgentOverlayPhase.FINISHED ||
+                state.value.phase == AgentOverlayPhase.FAILED
+            if (!hasActiveSession && isTerminalPhase) {
+                overlayRequested = false
+                dismissAndStop()
+            } else {
+                removeOverlayWindowsForForeground()
+            }
+        } else {
+            val session = activeSession
+            val activeRun = session != null && !session.isTerminal
+            val shouldRestore = AgentOverlayVisibilityPolicy.shouldRestoreFor(
+                activeRun = activeRun,
+                overlayRequested = overlayRequested,
+                appVisible = false,
+            )
+            if (shouldRestore) {
+                if (state.value.pendingUserInput != null) {
+                    capsuleExpanded.value = true
+                    ensureOverlayVisible()
+                    setCapsuleInputMode(true)
+                } else {
+                    ensureOverlayVisible()
+                    if (capsuleExpanded.value) {
+                        setCapsuleWindowHeight(CAPSULE_CONTROLS_HEIGHT_DP)
+                    }
+                }
+            }
         }
     }
 
@@ -1210,6 +1377,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         private const val CAPSULE_COLLAPSED_HEIGHT_DP = 68
         private const val CAPSULE_CONTROLS_HEIGHT_DP = 124
         private const val CAPSULE_SUPPLEMENT_HEIGHT_DP = 260
+        private const val CAPSULE_CLARIFY_HEIGHT_DP = 480
         private const val FALLBACK_SCREEN_CORNER_DP = 28
         const val MAX_ARCHIVED_USER_IMAGE_PREVIEWS = 4
     }

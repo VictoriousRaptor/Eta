@@ -162,6 +162,13 @@ internal object AgentPromptBuilder {
             )
         }
         roleplayContext?.personaMessage()?.let(messages::put)
+        if (config.clarifyEnabled) {
+            messages.put(systemMessage(
+                "缺少只有用户能给出的关键参数、偏好或决定时，使用 request_user_input 暂停当前任务并提出少量短问题；" +
+                    "收到工具返回的答案后继续这一轮，不从头重复已完成操作。能通过现有工具取得的信息先自行查询；" +
+                    "目标明确且可以合理推断的细节自行处理，不为日常问答或中间步骤反复要求确认。",
+            ))
+        }
         buildMemorySystemMessage(memoryContext, writable = roleplayContext == null)?.let(messages::put)
         buildSkillSystemMessage(skillContext)?.let(messages::put)
         return messages

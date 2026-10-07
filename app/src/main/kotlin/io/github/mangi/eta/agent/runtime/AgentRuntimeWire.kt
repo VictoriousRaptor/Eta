@@ -32,6 +32,9 @@ import kotlinx.serialization.json.Json
  */
 internal object AgentRuntimeWire {
     const val MSG_READ_CONTEXT_RESULT = 15
+    const val MSG_STEER = 16
+    const val MSG_ANSWER_USER_INPUT = 17
+    const val MSG_CONTROL_RESPONSE = 18
     const val OP_CHAT = "chat"
     const val OP_COMPACT = "compact"
     const val OP_REWRITE_REPLY = "rewrite_reply"
@@ -101,6 +104,7 @@ internal object AgentRuntimeWire {
     private const val KEY_MODEL_DISPLAY_NAME = "model_display_name"
     private const val KEY_CONTEXT_WINDOW = "context_window"
     private const val KEY_AUTO_COMPACTION_ENABLED = "auto_compaction_enabled"
+    private const val KEY_CLARIFY_ENABLED = "clarify_enabled"
     private const val KEY_SYSTEM_PROMPT = "system_prompt"
     private const val KEY_ANTHROPIC_VERSION = "anthropic_version"
     private const val KEY_OPENAI_ENDPOINT_MODE = "openai_endpoint_mode"
@@ -302,6 +306,7 @@ internal object AgentRuntimeWire {
         request.rewriteTargetMessageId?.let { putString("rewrite_target_message_id", it) }
         request.config.contextWindow?.let { putInt(KEY_CONTEXT_WINDOW, it) }
         putBoolean(KEY_AUTO_COMPACTION_ENABLED, request.config.autoCompactionEnabled)
+        putBoolean(KEY_CLARIFY_ENABLED, request.config.clarifyEnabled)
         AgentWireText.put(this, KEY_SYSTEM_PROMPT, request.config.systemPrompt, payloadDirectory)
         putString(KEY_ANTHROPIC_VERSION, request.config.anthropicVersion)
         putString(KEY_OPENAI_ENDPOINT_MODE, request.config.openAiEndpointMode)
@@ -437,6 +442,7 @@ internal object AgentRuntimeWire {
                     KEY_AUTO_COMPACTION_ENABLED,
                     Prefs.Keys.BOOLEAN_DEFAULTS.getValue(Prefs.Keys.AGENT_AUTO_COMPACTION_ENABLED),
                 ),
+                clarifyEnabled = bundle.getBoolean(KEY_CLARIFY_ENABLED, true),
                 systemPrompt = if (readText) AgentWireText.read(bundle, KEY_SYSTEM_PROMPT).orEmpty() else "",
                 anthropicVersion = bundle.getString(KEY_ANTHROPIC_VERSION).orEmpty()
                     .ifBlank { io.github.mangi.eta.data.model.AnthropicProviderSetting.DEFAULT_ANTHROPIC_VERSION },
@@ -624,6 +630,14 @@ internal object AgentRuntimeWire {
     /** 将 [AgentEvent] 打包为可跨进程传递的 [Bundle]。 */
     fun eventToBundle(event: AgentEvent): Bundle = Bundle().apply {
         when (event) {
+            is AgentEvent.UserInputRequested -> {
+                putString(KEY_TYPE, "user_input_requested")
+                putString("request", AgentUserInputCodec.encode(event.request))
+            }
+            is AgentEvent.UserInputAnswered -> {
+                putString(KEY_TYPE, "user_input_answered")
+                putString("answer", AgentUserInputCodec.encode(event.answer))
+            }
             is AgentEvent.RunStarted -> {
                 putString(KEY_TYPE, "run_started")
                 putInt("initial_images", event.initialImages)
@@ -774,6 +788,12 @@ internal object AgentRuntimeWire {
 
     /** 将 [Bundle] 还原为 [AgentEvent]，无法识别时返回 null。 */
     fun eventFromBundle(bundle: Bundle): AgentEvent? = when (bundle.getString(KEY_TYPE)) {
+        "user_input_requested" -> runCatching {
+            AgentEvent.UserInputRequested(AgentUserInputCodec.request(bundle.getString("request").orEmpty()))
+        }.getOrNull()
+        "user_input_answered" -> runCatching {
+            AgentEvent.UserInputAnswered(AgentUserInputCodec.answer(bundle.getString("answer").orEmpty()))
+        }.getOrNull()
         "run_started" -> AgentEvent.RunStarted(
             initialImages = bundle.getInt("initial_images"),
             initialImageBytes = bundle.getInt("initial_image_bytes"),

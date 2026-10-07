@@ -1,12 +1,14 @@
 package io.github.mangi.eta.ui.model
 
 import io.github.mangi.eta.data.model.ReasoningEffort
+import io.github.mangi.eta.agent.runtime.AgentUserInputAnswer
 
 sealed interface AgentHomeAction {
     data object CompactContext : AgentHomeAction
     data class ReasoningEffortChanged(val effort: ReasoningEffort) : AgentHomeAction
     data class ModelSelected(val modelId: String) : AgentHomeAction
     data class SubmitMessage(val text: String) : AgentHomeAction
+    data class AnswerUserInput(val answer: AgentUserInputAnswer) : AgentHomeAction
     data object StopRun : AgentHomeAction
     data class ImageAttached(val uri: String) : AgentHomeAction
     data class RemoveImage(val id: String) : AgentHomeAction

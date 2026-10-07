@@ -8,6 +8,8 @@ import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.automirrored.rounded.Help
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.AccessibilityNew
 import androidx.compose.material.icons.rounded.AccountTree
@@ -402,6 +404,22 @@ private fun SettingsPageContent(
                         iconTint = EtaPreferenceColors.Green,
                     )
 
+                    EtaPreferenceDivider()
+                    SwitchPref(
+                        context = context, prefs = agentPrefs,
+                        title = stringResource(R.string.settings_steer),
+                        summary = stringResource(R.string.settings_steer_summary),
+                        key = Prefs.Keys.AGENT_STEER_ENABLED,
+                        icon = Icons.AutoMirrored.Rounded.Chat, iconTint = EtaPreferenceColors.Blue,
+                    )
+                    EtaPreferenceDivider()
+                    SwitchPref(
+                        context = context, prefs = agentPrefs,
+                        title = stringResource(R.string.settings_clarify),
+                        summary = stringResource(R.string.settings_clarify_summary),
+                        key = Prefs.Keys.AGENT_CLARIFY_ENABLED,
+                        icon = Icons.AutoMirrored.Rounded.Help, iconTint = EtaPreferenceColors.Green,
+                    )
                     EtaPreferenceDivider()
                     EtaArrowPreference(
                         title = stringResource(R.string.ui_linux_tool_environment_314d22),

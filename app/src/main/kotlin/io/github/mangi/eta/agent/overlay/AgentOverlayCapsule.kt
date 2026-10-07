@@ -38,7 +38,14 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import io.github.mangi.eta.agent.runtime.AgentUserInputAnswer
+import io.github.mangi.eta.ui.components.AgentClarificationCard
+import io.github.mangi.eta.ui.components.rememberSteeringEnabled
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -87,35 +94,45 @@ internal fun AgentOverlayCapsule(
     onResume: () -> Unit,
     onStop: () -> Unit,
     onSupplementModeChange: (Boolean) -> Unit,
-    onSupplement: (String) -> Unit,
+    onSupplement: (String) -> Boolean,
+    onAnswerUserInput: (AgentUserInputAnswer) -> Boolean,
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
     var supplementMode by remember { mutableStateOf(false) }
     var supplementText by remember { mutableStateOf("") }
+    var supplementAcceptedExit by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val steerEnabled = rememberSteeringEnabled()
 
-    fun setSupplementMode(enabled: Boolean) {
+    fun setSupplementMode(enabled: Boolean, clearText: Boolean = true) {
         onSupplementModeChange(enabled)
         supplementMode = enabled
-        if (!enabled) supplementText = ""
+        supplementAcceptedExit = false
+        if (!enabled && clearText) supplementText = ""
     }
 
     // 收起键盘后再切换窗口焦点，避免输入法在窗口失焦瞬间闪退或残留。
-    fun leaveSupplementMode(then: () -> Unit = {}) {
+    fun leaveSupplementMode(clearText: Boolean = true, then: () -> Unit = {}) {
         focusManager.clearFocus(force = true)
         keyboard?.hide()
         scope.launch {
             delay(80)
-            setSupplementMode(false)
+            setSupplementMode(false, clearText)
             then()
         }
     }
 
     LaunchedEffect(expanded) {
         if (!expanded && supplementMode) leaveSupplementMode()
+    }
+
+    LaunchedEffect(state.pendingUserInput) {
+        if (state.pendingUserInput != null && supplementMode) {
+            leaveSupplementMode(clearText = false)
+        }
     }
 
     val accent by animateColorAsState(overlayPhaseAccent(state.phase), tween(240), label = "capsule_accent")
@@ -183,7 +200,9 @@ internal fun AgentOverlayCapsule(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    ThoughtLine(thought = state.thought.takeIf { state.phase == AgentOverlayPhase.RUNNING }.orEmpty())
+                    if (state.pendingUserInput == null) {
+                        ThoughtLine(thought = state.thought.takeIf { state.phase == AgentOverlayPhase.RUNNING }.orEmpty())
+                    }
                     }
                 }
 
@@ -199,14 +218,80 @@ internal fun AgentOverlayCapsule(
                             .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
                             .graphicsLayer { translationY = (1f - expansion) * -6.dp.toPx() },
                     ) {
-                        if (supplementMode) {
+                        if (state.pendingUserInput != null) {
+                            val request = state.pendingUserInput
+                            key(request.id) {
+                                var submitting by remember { mutableStateOf(false) }
+                                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                                    val cardMaxHeight = (maxHeight - 46.dp).coerceAtLeast(0.dp)
+                                    Column {
+                                        AgentClarificationCard(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = cardMaxHeight),
+                                            request = request,
+                                            submitting = submitting,
+                                            compact = true,
+                                            onSubmit = {
+                                                submitting = true
+                                                val success = onAnswerUserInput(it)
+                                                if (!success) {
+                                                    submitting = false
+                                                } else {
+                                                    focusManager.clearFocus(force = true)
+                                                    keyboard?.hide()
+                                                }
+                                            },
+                                        )
+                                        Spacer(Modifier.height(12.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                                        ) {
+                                            if (state.phase == AgentOverlayPhase.RUNNING) {
+                                                CapsuleAction(
+                                                    icon = Icons.Rounded.Pause,
+                                                    label = stringResource(R.string.overlay_pause),
+                                                    tint = MiuixTheme.colorScheme.onSurface,
+                                                    onClick = onPause,
+                                                )
+                                            } else if (state.phase == AgentOverlayPhase.PAUSED) {
+                                                CapsuleAction(
+                                                    icon = Icons.Rounded.PlayArrow,
+                                                    label = stringResource(R.string.overlay_resume),
+                                                    tint = MiuixTheme.colorScheme.primary,
+                                                    onClick = onResume,
+                                                )
+                                            }
+                                            CapsuleAction(
+                                                icon = Icons.Rounded.Stop,
+                                                label = stringResource(R.string.action_stop),
+                                                tint = MiuixTheme.colorScheme.error,
+                                                onClick = onStop,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (supplementMode) {
                             OverlaySupplementInput(
                                 value = supplementText,
                                 onValueChange = { supplementText = it },
                                 onCancel = { leaveSupplementMode() },
                                 onSend = {
-                                    val text = supplementText.trim()
-                                    if (text.isNotBlank()) leaveSupplementMode { onSupplement(text) }
+                                    if (!supplementAcceptedExit) {
+                                        val text = supplementText.trim()
+                                        if (text.isNotBlank() && steerEnabled) {
+                                            // Only leave mode if the text was accepted by the callback.
+                                            if (onSupplement(text)) {
+                                                supplementAcceptedExit = true
+                                                if (supplementText.trim() == text) {
+                                                    supplementText = ""
+                                                }
+                                                leaveSupplementMode(clearText = false)
+                                            }
+                                        }
+                                    }
                                 },
                             )
                         } else {
@@ -214,12 +299,14 @@ internal fun AgentOverlayCapsule(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
                             ) {
-                                CapsuleAction(
-                                    icon = Icons.Rounded.Edit,
-                                    label = stringResource(R.string.overlay_supplement),
-                                    tint = MiuixTheme.colorScheme.onSurface,
-                                    onClick = { setSupplementMode(true) },
-                                )
+                                if (steerEnabled) {
+                                    CapsuleAction(
+                                        icon = Icons.Rounded.Edit,
+                                        label = stringResource(R.string.overlay_supplement),
+                                        tint = MiuixTheme.colorScheme.onSurface,
+                                        onClick = { setSupplementMode(true) },
+                                    )
+                                }
                                 if (state.phase == AgentOverlayPhase.RUNNING) {
                                     CapsuleAction(
                                         icon = Icons.Rounded.Pause,

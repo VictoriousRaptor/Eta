@@ -7,6 +7,26 @@ import org.junit.Test
 
 class AgentOverlayVisibilityPolicyTest {
     @Test
+    fun clarificationRevealsAnAnswerSurfaceAndKeepsPauseIndependent() {
+        val request = io.github.mangi.eta.agent.runtime.AgentUserInputRequest("question", listOf(
+            io.github.mangi.eta.agent.runtime.AgentUserInputQuestion("city", "目的地？"),
+        ))
+        val event = AgentEvent.UserInputRequested(request)
+        assertTrue(AgentOverlayVisibilityPolicy.shouldRevealFor(event))
+        assertTrue(AgentOverlayVisibilityPolicy.shouldDismissEntrySurfaceFor(event))
+        val waiting = AgentOverlayState(phase = AgentOverlayPhase.PAUSED).applyEvent(event)
+        val supplemented = waiting.applyEvent(AgentEvent.UserSupplementReceived(1, "补充"))
+        org.junit.Assert.assertEquals(AgentOverlayPhase.PAUSED, supplemented.phase)
+        org.junit.Assert.assertEquals(request, supplemented.pendingUserInput)
+        val answered = supplemented.applyEvent(AgentEvent.UserInputAnswered(
+            io.github.mangi.eta.agent.runtime.AgentUserInputAnswer(request.id, mapOf("city" to "广州")),
+        ))
+        org.junit.Assert.assertNull(answered.pendingUserInput)
+        org.junit.Assert.assertEquals(AgentOverlayPhase.PAUSED, answered.phase)
+        org.junit.Assert.assertEquals(AgentOverlayStatus.Paused, answered.status)
+    }
+
+    @Test
     fun `text-only and background tool events do not reveal operation overlay`() {
         val events = listOf(
             AgentEvent.RunStarted(
@@ -231,5 +251,114 @@ class AgentOverlayVisibilityPolicyTest {
                 entrySurfaceReady = true,
             )
         )
+    }
+
+    @Test
+    fun foregroundSuppressesClarifyAndForegroundTools() {
+        val clarifyEvent = AgentEvent.UserInputRequested(
+            io.github.mangi.eta.agent.runtime.AgentUserInputRequest(
+                id = "req-1",
+                questions = listOf(io.github.mangi.eta.agent.runtime.AgentUserInputQuestion("q", "问题")),
+            ),
+        )
+        val toolEvent = AgentEvent.ToolStarted(
+            round = 1,
+            toolCallId = "call_tap",
+            name = "tap",
+            argsPreview = "{}",
+        )
+
+        // 后台（appVisible = false 或默认单参数）：正常显示
+        assertTrue(AgentOverlayVisibilityPolicy.shouldRevealFor(clarifyEvent))
+        assertTrue(AgentOverlayVisibilityPolicy.shouldRevealFor(clarifyEvent, appVisible = false))
+        assertTrue(AgentOverlayVisibilityPolicy.shouldRevealFor(toolEvent))
+        assertTrue(AgentOverlayVisibilityPolicy.shouldRevealFor(toolEvent, appVisible = false))
+
+        // 前台（appVisible = true）：一律抑制，不显示悬浮窗
+        assertFalse(AgentOverlayVisibilityPolicy.shouldRevealFor(clarifyEvent, appVisible = true))
+        assertFalse(AgentOverlayVisibilityPolicy.shouldRevealFor(toolEvent, appVisible = true))
+    }
+
+    @Test
+    fun shouldRestoreForPolicyBehavior() {
+        // 前台可见时：绝不恢复
+        assertFalse(
+            AgentOverlayVisibilityPolicy.shouldRestoreFor(
+                activeRun = true,
+                overlayRequested = true,
+                appVisible = true,
+            )
+        )
+
+        // 已经处于终态（activeRun = false）：绝不复活
+        assertFalse(
+            AgentOverlayVisibilityPolicy.shouldRestoreFor(
+                activeRun = false,
+                overlayRequested = true,
+                appVisible = false,
+            )
+        )
+
+        // 本次 run 未曾请求过展示（例如纯后台文本/搜索）：不恢复
+        assertFalse(
+            AgentOverlayVisibilityPolicy.shouldRestoreFor(
+                activeRun = true,
+                overlayRequested = false,
+                appVisible = false,
+            )
+        )
+
+        // 活跃 run、曾请求过展示、退至后台：正常恢复
+        assertTrue(
+            AgentOverlayVisibilityPolicy.shouldRestoreFor(
+                activeRun = true,
+                overlayRequested = true,
+                appVisible = false,
+            )
+        )
+    }
+
+    @Test
+    fun shouldShowResultCardPolicyBehavior() {
+        // 前台发生终态：不展示结果卡片
+        assertFalse(
+            AgentOverlayVisibilityPolicy.shouldShowResultCard(
+                hasExecutedForegroundTool = true,
+                appVisible = true,
+            )
+        )
+
+        // 后台发生终态且执行过前台工具：展示结果卡片
+        assertTrue(
+            AgentOverlayVisibilityPolicy.shouldShowResultCard(
+                hasExecutedForegroundTool = true,
+                appVisible = false,
+            )
+        )
+
+        // 未执行前台工具：任何情况均不展示结果卡片
+        assertFalse(
+            AgentOverlayVisibilityPolicy.shouldShowResultCard(
+                hasExecutedForegroundTool = false,
+                appVisible = false,
+            )
+        )
+    }
+
+    @Test
+    fun typeTextToolStartedRevealsDismissesAndIsSuppressedWhenForeground() {
+        val event = AgentEvent.ToolStarted(
+            round = 1,
+            toolCallId = "call_type",
+            name = "type_text",
+            argsPreview = "输入文本",
+        )
+        // 允许后台展示和关闭前台入口
+        assertTrue(AgentOverlayVisibilityPolicy.shouldRevealFor(event))
+        assertTrue(AgentOverlayVisibilityPolicy.shouldRevealFor(event, appVisible = false))
+        assertTrue(AgentOverlayVisibilityPolicy.shouldDismissEntrySurfaceFor(event))
+
+        // 前台appVisible=true时一律抑制
+        assertFalse(AgentOverlayVisibilityPolicy.shouldRevealFor(event, appVisible = true))
     }
 }

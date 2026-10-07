@@ -44,6 +44,9 @@ import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.runtime.Composable
+import io.github.mangi.eta.agent.runtime.AgentUserInputRequest
+import io.github.mangi.eta.agent.runtime.AgentUserInputAnswer
+import io.github.mangi.eta.ui.model.SteerAcknowledgement
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
@@ -156,6 +159,11 @@ internal fun AgentChatBody(
     onRunTraceClick: () -> Unit,
     onOpenBrowser: () -> Unit,
     characterName: String? = null,
+    steerEnabled: Boolean = false,
+    interactionSubmitting: Boolean = false,
+    steerAcknowledgement: SteerAcknowledgement? = null,
+    pendingUserInput: AgentUserInputRequest? = null,
+    onAnswerUserInput: (AgentUserInputAnswer) -> Unit = {},
     isDrawerOpen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
@@ -222,6 +230,11 @@ internal fun AgentChatBody(
             isCompacting = isCompacting,
             contextUsage = contextUsage,
             isStreaming = isStreaming,
+            steerEnabled = steerEnabled,
+            interactionSubmitting = interactionSubmitting,
+            steerAcknowledgement = steerAcknowledgement,
+            pendingUserInput = pendingUserInput,
+            onAnswerUserInput = onAnswerUserInput,
             reasoningEffort = reasoningEffort,
             availableReasoningEfforts = availableReasoningEfforts,
             pendingImages = pendingImages,
@@ -274,6 +287,11 @@ private fun AgentChatScaffold(
     isCompacting: Boolean,
     contextUsage: AgentContextUsageUi,
     isStreaming: Boolean,
+    steerEnabled: Boolean,
+    interactionSubmitting: Boolean,
+    steerAcknowledgement: SteerAcknowledgement?,
+    pendingUserInput: AgentUserInputRequest?,
+    onAnswerUserInput: (AgentUserInputAnswer) -> Unit,
     reasoningEffort: ReasoningEffort,
     availableReasoningEfforts: List<ReasoningEffort>,
     pendingImages: List<PendingImageUi>,
@@ -325,6 +343,11 @@ private fun AgentChatScaffold(
         ),
         bottomBar = {
             AgentChatBottomBar(
+                steerEnabled = steerEnabled,
+                interactionSubmitting = interactionSubmitting,
+                steerAcknowledgement = steerAcknowledgement,
+                pendingUserInput = pendingUserInput,
+                onAnswerUserInput = onAnswerUserInput,
                 messageBackdrop = messageBackdrop.takeIf { frostEnabled },
                 input = input,
                 modelPickerState = modelPickerState,
@@ -866,6 +889,11 @@ internal fun resolveFinalResultMessageIds(
 
 @Composable
 private fun AgentChatBottomBar(
+    steerEnabled: Boolean,
+    interactionSubmitting: Boolean,
+    steerAcknowledgement: SteerAcknowledgement?,
+    pendingUserInput: AgentUserInputRequest?,
+    onAnswerUserInput: (AgentUserInputAnswer) -> Unit,
     messageBackdrop: LayerBackdrop?,
     input: String,
     modelPickerState: AgentModelPickerUiState,
@@ -950,7 +978,14 @@ private fun AgentChatBottomBar(
                 .navigationBarsPadding()
                 .padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
         ) {
+            pendingUserInput?.let { request ->
+                AgentClarificationCard(request, interactionSubmitting, onAnswerUserInput,
+                    modifier = Modifier.padding(bottom = 8.dp))
+            }
             AgentChatInputBar(
+                steerEnabled = steerEnabled,
+                interactionSubmitting = interactionSubmitting,
+                steerAcknowledgement = steerAcknowledgement,
                 input = input,
                 modelPickerState = modelPickerState,
                 isCompacting = isCompacting,
