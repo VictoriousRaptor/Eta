@@ -50,7 +50,7 @@ internal data class AgentChatUiState(
     }
 }
 
-internal data class SteerAcknowledgement(val text: String, val sequence: Long)
+internal data class SteerAcknowledgement(val text: String, val sequence: Long, val inputSyncVersion: Int)
 
 @Immutable
 sealed interface AgentChatMessageUi {
