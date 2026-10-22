@@ -57,6 +57,20 @@ pending steering
 
 工具接口的设计依据：OpenAI 的 [Function calling](https://developers.openai.com/api/docs/guides/function-calling) 强调清晰的参数说明、可预测的行为，以及由程序提供已经知道的信息；它推荐的 strict mode 属于模型生成侧约束。Anthropic 的 [Writing effective tools for agents](https://www.anthropic.com/engineering/writing-tools-for-agents) 强调无歧义的参数与可操作的错误反馈。这些建议不等同于取消所有输入处理；Eta 将参数解释放在实际执行边界，保留系统权限、资源预算和具体操作所需的语义检查，不维护平行的通用校验器。
 
+## 运行中交互
+
+设置页的「中途插话」和「不确定时问我」是两个独立、默认开启的本地开关，不要求 Root 或 LSPosed。前者在提交时读取最新设置；后者在 run 开始时冻结，修改后对新任务生效。关闭 Clarify 不向模型公开 `request_user_input`，普通文本问答保持原有行为。
+
+App 聊天页运行中沿用上游的主发送操作：短按将文字及附件排入队列，长按或点击队列闪电按钮取消当前 run，收尾后优先发送新任务；手动停止保留队列但不自动发送。Steer 开启时另提供「发送补充」按钮，在同一 run 内补充文字，不取消当前模型请求或工具。补充成功接收后才清空对应草稿；用户在等待确认期间输入的新文字不会被清空。同 run 补充不携带图片或文件，附件保留在草稿。浮层补充也读取同一开关。`MSG_STEER` 按 run ID 接收，不会把对旧 run 的补充变成新任务；任务完成后切换为结果卡片，用户可从卡片打开 Eta 会话继续后续交流。
+
+Clarify 工具允许 1 到 3 个问题，每题可给出最多 4 个建议答案，也支持自由文本。Loop 校验参数后建立独立请求 ID，发出 `UserInputRequested`，可取消地等待用户回答；后续模型请求和批次工具均不会越过等待点。`MSG_ANSWER_USER_INPUT` 核对 run ID、request ID 和完整问题 ID 集合，拒绝重复、迟到或错误请求的答案。回答经 `UserInputAnswered` 回放到 UI，并作为原工具调用的结果继续同一 run；工具批次结果仍保持连续。
+
+澄清等待、用户暂停与 Steer 队列各自独立。等待期间可以排队插话，回答不能解除用户暂停；取消会唤醒澄清等待并拒绝之后的答案。聊天页和运行浮层共用澄清卡片，问题与回答同时保留在可见历史。需要交互时会展开运行浮层；系统助手入口沿用既有 entry-surface 交接。
+
+两个澄清事件经过既有 Binder、checkpoint、归档和 session 重连回放；进程仍存活时可重新回答待处理的问题。进程死亡后的恢复按既有中断策略结束等待，不重新执行工具或假装仍有活动任务。新 run 清除旧的临时交互状态。压缩和角色回复改写不公开澄清工具或加入澄清提示。
+
+迁移后的运行胶囊共用澄清卡片，支持逐题分页、答案保留及胶囊内的紧凑间距；胶囊、结果卡片等交互浮层保持 `FLAG_KEEP_SCREEN_ON` 常亮，装饰性氛围光窗口则不保持；进入 Eta 前台会移除浮层窗口，但不会取消正在执行的活跃任务或待处理的澄清，返回后台时仅重新恢复仍被请求的活跃浮层。
+
 ## 可选角色上下文
 
 角色按 App 会话绑定；Runtime 从该会话的持久记录读取角色 ID 和备用快照，再冻结本次使用的最新卡片。普通会话及系统助手入口使用默认人格。角色设定、世界书和剧情记忆由独立上下文投影提供，工具规则和执行器继续沿用 Agent 链路。
@@ -275,7 +289,7 @@ APK 分析在 Alpine 与 Debian 中都作为可选档案显示。JADX、Apktool�
 
 ## 后台执行生命周期
 
-App 本体的当前会话正在回复且处于聊天页时，以及 GUI 运行浮层正在执行时，通过 Android [`View.keepScreenOn`](https://developer.android.com/develop/background-work/background-tasks/awake/screen-on) 保持屏幕常亮，底层使用 `FLAG_KEEP_SCREEN_ON`。仅已有窗口可见时生效；暂停、停止、完成、失败或 Runtime 服务销毁时清除。任务结束后的结果卡片、设置页、空闲会话与纯后台任务不额外保持常亮，无需新增权限，也不修改系统亮度和息屏时间。用户主动锁屏不取消后台任务，但 GUI 操作通常仍需亮屏、解锁；后台执行不因常亮功能获得额外的 CPU 或网络保活保证。
+App 本体的当前会话正在回复且处于聊天页时，沿用上游通过 Android [`View.keepScreenOn`](https://developer.android.com/develop/background-work/background-tasks/awake/screen-on) 保持屏幕常亮的逻辑；暂停、停止、完成、失败或 Runtime 服务销毁时清除聊天页的常亮请求。运行胶囊、结果卡片与系统助手交互窗口继续保留 custom 的 `FLAG_KEEP_SCREEN_ON`，这些窗口仍可见时（包括暂停或等待回答）保持常亮，移除窗口后解除；装饰性氛围光窗口不申请常亮。设置页、空闲会话与纯后台任务不额外保持常亮，无需新增权限，也不修改系统亮度和息屏时间。用户主动锁屏不取消后台任务，但 GUI 操作通常仍需亮屏、解锁；后台执行不因常亮功能获得额外的 CPU 或网络保活保证。
 
 `AgentExecutionService` 使用 `specialUse` 前台类型，为当前 Agent 运行、普通终端和 PRoot 后台进程持有任务引用。用户退出页面只断开 UI；最后一个任务结束时服务释放，通知中的停止操作回收它实际持有的任务。普通后台任务保持宿主 tracer 与输出读取，不能像 Root daemon 那样脱离 App 生命周期。Root daemon 保持原有独立生命周期，普通任务清理不会批量停止 Root daemon。Root 用户的原有 Runtime 绑定链路在新增前台服务启动受限时仍可继续，不因新增服务阻断厂商助手入口。
 

@@ -63,6 +63,8 @@ internal class AgentRunMessageProjector(
             ensureCompletedThinking(runId, event.round, event.reasoningContent, messages)
         }
         is AgentEvent.RunFinished -> finalizeText(runId, finalizeThinking(runId, messages))
+        is AgentEvent.UserInputRequested,
+        is AgentEvent.UserInputAnswered,
         is AgentEvent.UserSupplementReceived,
         is AgentEvent.RunStarted,
         is AgentEvent.ProviderRequestStarted,
@@ -105,12 +107,12 @@ internal class AgentRunMessageProjector(
         }
         return messages.filterNot { message ->
             when (message) {
-                is AgentMessageUi -> isAssistantMessageForRun(message.id, runId)
+                is AgentMessageUi -> isAssistantMessageForRun(message.id, runId) || message.id.startsWith("clarification-$runId-")
                 is ThinkingMessageUi -> message.id.startsWith("$runId-thinking-")
                 is ToolActivityMessageUi -> message.id.startsWith("$runId-tool-")
                 is SystemNoticeMessageUi ->
                     isAssistantMessageForRun(message.id, runId) || message.id == "interrupted-$runId"
-                is UserMessageUi -> message.id in replaySupplementIds
+                is UserMessageUi -> message.id in replaySupplementIds || message.id.startsWith("clarification-answer-$runId-")
                 else -> false
             }
         }

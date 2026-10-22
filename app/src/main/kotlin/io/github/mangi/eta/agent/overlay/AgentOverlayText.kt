@@ -10,6 +10,7 @@ import io.github.mangi.eta.R
 internal sealed interface AgentOverlayStatus {
     data object Reasoning : AgentOverlayStatus
     data object SupplementReceived : AgentOverlayStatus
+    data object WaitingForUser : AgentOverlayStatus
     data class RunningTool(val name: String) : AgentOverlayStatus
     data class HostedToolRunning(val name: String) : AgentOverlayStatus
     data object ResultReady : AgentOverlayStatus
@@ -28,6 +29,7 @@ internal fun AgentOverlayStatus.localizedText(): String = localizedText(LocalRes
 
 /** 通知等非 Compose 表面与浮层共用同一套状态文案。 */
 internal fun AgentOverlayStatus.localizedText(resources: Resources): String = when (this) {
+    AgentOverlayStatus.WaitingForUser -> resources.getString(R.string.clarify_waiting)
     AgentOverlayStatus.Reasoning -> resources.getString(R.string.overlay_reasoning)
     AgentOverlayStatus.SupplementReceived -> resources.getString(R.string.overlay_supplement_received)
     // 工具名本身就是动作（点击元素、读取文件），不再加"执行："前缀。
@@ -55,6 +57,7 @@ internal fun toolDisplayName(resources: Resources, name: String): String {
 
 @StringRes
 internal fun toolDisplayNameResource(name: String): Int? = when (name) {
+    "request_user_input" -> R.string.settings_clarify
     "observe_screen" -> R.string.tool_observe_screen
     "tap" -> R.string.tool_tap
     "tap_element" -> R.string.tool_tap_element

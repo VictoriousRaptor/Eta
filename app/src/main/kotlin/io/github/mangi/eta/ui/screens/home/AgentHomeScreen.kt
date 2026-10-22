@@ -3,6 +3,7 @@ package io.github.mangi.eta.ui.screens.home
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
+import io.github.mangi.eta.ui.components.rememberSteeringEnabled
 import androidx.compose.ui.Modifier
 import io.github.mangi.eta.ui.components.AgentChatBody
 import io.github.mangi.eta.ui.components.AgentConversationLoadState
@@ -32,6 +33,7 @@ internal fun AgentHomeScreen(
     isDrawerOpen: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val steerEnabled = rememberSteeringEnabled()
     // key 内保持完整分支，避免提前返回遗留无法转换为 DEX 的编译器标记。
     key(chatConversationCompositionKey(conversationKey)) {
         if (!state.isConversationLoaded) {
@@ -49,6 +51,11 @@ internal fun AgentHomeScreen(
                     isCompacting = state.isCompacting,
                     input = state.input,
                     isStreaming = state.isStreaming,
+                    steerEnabled = steerEnabled && !state.isCompacting && state.roleplayMessages.pendingRewrites.isEmpty(),
+                    interactionSubmitting = state.interactionSubmitting,
+                    steerAcknowledgement = state.steerAcknowledgement,
+                    pendingUserInput = state.pendingUserInput.takeIf { state.isStreaming },
+                    onAnswerUserInput = { onAction(AgentHomeAction.AnswerUserInput(it)) },
                     reasoningEffort = state.reasoningEffort,
                     availableReasoningEfforts = state.availableReasoningEfforts,
                     pendingImages = state.pendingImages,
@@ -61,6 +68,7 @@ internal fun AgentHomeScreen(
                     canCompactContext = state.canCompactContext,
                     onModelSelected = { onAction(AgentHomeAction.ModelSelected(it)) },
                     onSubmit = { text -> onAction(AgentHomeAction.SubmitMessage(text)) },
+                    onSteer = { text -> onAction(AgentHomeAction.SteerMessage(text)) },
                     onInterruptAndSubmit = { text -> onAction(AgentHomeAction.InterruptAndSubmitMessage(text)) },
                     onSteerQueuedMessage = { id -> onAction(AgentHomeAction.SteerQueuedMessage(id)) },
                     onRecallQueuedMessage = { id, draft -> onAction(AgentHomeAction.RecallQueuedMessage(id, draft)) },

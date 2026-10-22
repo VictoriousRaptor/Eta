@@ -3,6 +3,9 @@ package io.github.mangi.eta.ui.app
 import android.content.Context
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.runtime.AgentRuntimeWire
+import io.github.mangi.eta.agent.runtime.AgentUserInputQuestion
+import io.github.mangi.eta.agent.runtime.AgentUserInputRequest
+import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.data.db.ConversationMessageEntity
 import io.github.mangi.eta.ui.model.AgentChatHomeUiState
@@ -47,6 +50,57 @@ class AgentAppStateConversationLoadingTest {
         scope.cancel()
         awaitCondition { job.isCompleted }
         EtaDatabase.closeForTests()
+    }
+
+    @Test
+    fun streamingMainSubmitQueuesWithoutReplacingThePendingClarification() {
+        val state = streamingConversation()
+        val pending = state.homeState.pendingUserInput
+
+        state.sendCurrentMessage("queued message")
+
+        assertEquals(listOf("queued message"), state.homeState.queuedMessages.map { it.content })
+        assertEquals(pending, state.homeState.pendingUserInput)
+        assertTrue(state.homeState.isStreaming)
+        assertFalse(state.homeState.interactionSubmitting)
+    }
+
+    @Test
+    fun noninterruptSupplementUsesTheExistingRunAndRetainsDraftWhenRejected() {
+        val state = streamingConversation()
+        val runIdField = AgentAppState::class.java.getDeclaredField("currentRunId").apply { isAccessible = true }
+        runIdField.set(state, "interaction-run")
+        @Suppress("UNCHECKED_CAST")
+        val owners = AgentAppState::class.java.getDeclaredField("runConversationIds").apply { isAccessible = true }
+            .get(state) as MutableMap<String, String>
+        owners["interaction-run"] = "first"
+
+        state.steerCurrentMessage("supplement")
+
+        assertTrue(state.homeState.interactionSubmitting)
+        assertTrue(state.homeState.queuedMessages.isEmpty())
+        assertEquals("interaction-run", runIdField.get(state))
+        awaitCondition { !state.homeState.interactionSubmitting }
+        assertEquals("draft", state.homeState.input)
+        assertEquals(null, state.homeState.steerAcknowledgement)
+        assertTrue(state.homeState.queuedMessages.isEmpty())
+    }
+
+    private fun streamingConversation(): AgentAppState {
+        seed("first" to conversation("first"))
+        Prefs.initLocal(context)
+        requireNotNull(Prefs.localAgentPreferences()).edit().putBoolean(Prefs.Keys.AGENT_STEER_ENABLED, true).commit()
+        val state = AgentAppState(context, scope)
+        val recovering = AgentAppState::class.java.getDeclaredField("runtimeRecoveryInProgress")
+            .apply { isAccessible = true }.get(state) as java.util.concurrent.atomic.AtomicBoolean
+        awaitCondition { !recovering.get() }
+        val pending = AgentUserInputRequest("question", listOf(AgentUserInputQuestion("choice", "Which?", emptyList())))
+        AgentAppState::class.java.getDeclaredMethod(
+            "updateCurrentConversation", AgentChatHomeUiState::class.java, java.lang.Boolean.TYPE,
+        ).apply { isAccessible = true }.invoke(
+            state, state.homeState.copy(isStreaming = true, input = "draft", pendingUserInput = pending), false,
+        )
+        return state
     }
 
     @Test

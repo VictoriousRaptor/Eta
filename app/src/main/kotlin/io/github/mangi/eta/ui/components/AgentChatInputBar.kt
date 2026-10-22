@@ -45,6 +45,7 @@ import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AddComment
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Stop
@@ -87,6 +88,7 @@ import io.github.mangi.eta.ui.model.AgentModelPickerUiState
 import io.github.mangi.eta.ui.model.PendingFileReferenceUi
 import io.github.mangi.eta.ui.model.PendingImageUi
 import io.github.mangi.eta.ui.model.QueuedMessageUi
+import io.github.mangi.eta.ui.model.SteerAcknowledgement
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.Icon
@@ -133,6 +135,7 @@ internal fun AgentChatInputBar(
     canCompactContext: Boolean,
     onModelSelected: (String) -> Unit,
     onSubmit: (String) -> Unit,
+    onSteer: (String) -> Unit = {},
     onInterruptAndSubmit: (String) -> Unit = onSubmit,
     onSteerQueuedMessage: (String) -> Unit = {},
     onRecallQueuedMessage: (String, String) -> Unit = { _, _ -> },
@@ -146,6 +149,9 @@ internal fun AgentChatInputBar(
     onRemoveFileReference: (String) -> Unit,
     onCancelMessageEdit: () -> Unit,
     modifier: Modifier = Modifier,
+    steerEnabled: Boolean = false,
+    interactionSubmitting: Boolean = false,
+    steerAcknowledgement: SteerAcknowledgement? = null,
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
     val hapticFeedback = LocalHapticFeedback.current
@@ -166,6 +172,13 @@ internal fun AgentChatInputBar(
     val canSend = textFieldState.text.isNotBlank() ||
         pendingImages.isNotEmpty() ||
         pendingFileReferences.isNotEmpty()
+    val canSteer = isStreaming && steerEnabled && !interactionSubmitting &&
+        textFieldState.text.isNotBlank() && pendingImages.isEmpty() && pendingFileReferences.isEmpty()
+    LaunchedEffect(steerAcknowledgement) {
+        if (steerAcknowledgement != null && textFieldState.text.toString().trim() == steerAcknowledgement.text) {
+            textFieldState.clearText()
+        }
+    }
     val density = LocalDensity.current
     val statusBarTopPx = WindowInsets.statusBars.getTop(density)
     var inputContainerTopPx by remember { mutableIntStateOf(0) }
@@ -298,6 +311,7 @@ internal fun AgentChatInputBar(
                                 character != null && isStreaming ->
                                     stringResource(R.string.chat_character_typing, character.characterName)
                                 character != null -> stringResource(R.string.chat_character_input_hint, character.characterName)
+                                isStreaming && steerEnabled -> stringResource(R.string.chat_steer_hint)
                                 isStreaming -> stringResource(R.string.chat_eta_working)
                                 else -> stringResource(R.string.chat_input_hint)
                             },
@@ -382,6 +396,26 @@ internal fun AgentChatInputBar(
                             onModelSelected = onModelSelected,
                         )
 
+                        if (isStreaming && steerEnabled) {
+                            IconButton(
+                                onClick = {
+                                    if (canSteer) {
+                                        dictation.cancel()
+                                        onSteer(textFieldState.text.toString())
+                                    }
+                                },
+                                enabled = canSteer,
+                                minWidth = ChatInputActionSize,
+                                minHeight = ChatInputActionSize,
+                            ) {
+                                Icon(
+                                    Icons.Rounded.AddComment,
+                                    stringResource(R.string.chat_steer_send),
+                                    modifier = Modifier.size(ChatInputActionIconSize),
+                                    tint = if (canSteer) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
+                        }
                         val showStreamingSend = isStreaming && !isCompacting && canSend
                         val submitCurrentDraft: (Boolean) -> Unit = { interrupt ->
                             if (canSend) {

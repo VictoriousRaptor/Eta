@@ -28,6 +28,8 @@ class AgentRunMessageProjectorTest {
             AgentEvent.UsageReceived(1, AgentTokenUsage(null, null, null, null, null)),
             AgentEvent.UsageReceived(9, AgentTokenUsage(null, 10, 2, null, null)),
             AgentEvent.UserSupplementReceived(0, "补充"),
+            AgentEvent.UserInputRequested(io.github.mangi.eta.agent.runtime.AgentUserInputRequest("question", emptyList())),
+            AgentEvent.UserInputAnswered(io.github.mangi.eta.agent.runtime.AgentUserInputAnswer("question", emptyMap())),
         ).forEach { event -> assertSame(event.toString(), messages, projector.applyEvent("run", event, messages)) }
     }
 
@@ -588,5 +590,39 @@ class AgentRunMessageProjectorTest {
         assertEquals("上下文压缩已中断", interruptedNotice.detail)
         assertFalse(interruptedNotice.running)
         assertEquals(base + completed, projector.finishContextCompaction(runId, base + completed, "上下文压缩已中断"))
+    }
+
+    @Test
+    fun resetForReplayDeletesClarificationAndClarificationAnswersForTargetRunOnly() {
+        val projector = AgentRunMessageProjector(nowElapsedRealtime = { 1_000L })
+        val runA = "run-a"
+        val runB = "run-b"
+
+        val userNormal = UserMessageUi(id = "user-$runA", content = "用户常规输入")
+        val userClarificationAnswerA = UserMessageUi(id = "clarification-answer-$runA-1", content = "回答A")
+        val clarificationA = AgentMessageUi(id = "clarification-$runA-1", content = "请澄清A")
+
+        val userClarificationAnswerB = UserMessageUi(id = "clarification-answer-$runB-1", content = "回答B")
+        val clarificationB = AgentMessageUi(id = "clarification-$runB-1", content = "请澄清B")
+        val otherUser = UserMessageUi(id = "user-$runB", content = "B的常规输入")
+
+        val messages = listOf(
+            userNormal,
+            clarificationA,
+            userClarificationAnswerA,
+            otherUser,
+            clarificationB,
+            userClarificationAnswerB,
+        )
+
+        val resetA = projector.resetForReplay(runA, messages)
+        assertEquals(
+            listOf(userNormal, otherUser, clarificationB, userClarificationAnswerB),
+            resetA,
+        )
+
+        // 重复replay无重复或多删
+        val repeated = projector.resetForReplay(runA, resetA)
+        assertEquals(resetA, repeated)
     }
 }

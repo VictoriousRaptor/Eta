@@ -14,6 +14,26 @@ import org.junit.Test
 
 class AgentRuntimeRequestConfigResolverTest {
     @Test
+    fun runtimeReplacementPreservesFrozenClarificationChoiceForVoiceAndOauth() {
+        for (source in listOf(AgentRuntimeWire.ETA_VOICE_HANDOFF_SOURCE, "breeno")) {
+            for (entryEnabled in listOf(false, true)) {
+                for (runtimeEnabled in listOf(false, true)) {
+                    val local = modelConfig("", ReasoningEffort.DEFAULT).copy(
+                        providerId = "account-provider",
+                        authMode = ProviderAuthModes.OPENAI_CHATGPT,
+                        clarifyEnabled = runtimeEnabled,
+                    )
+                    val request = request(source, local.copy(clarifyEnabled = entryEnabled))
+
+                    val result = AgentRuntimeRequestConfigResolver.applyRuntimeConfig(request, local)
+
+                    assertEquals(entryEnabled, result.config.clarifyEnabled)
+                }
+            }
+        }
+    }
+
+    @Test
     fun oauthRequestUsesLocalConnectionAndPreservesSupportedTransientChoices() {
         val local = modelConfig("", ReasoningEffort.DEFAULT).copy(
             providerId = "account-provider",
