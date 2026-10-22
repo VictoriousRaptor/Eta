@@ -169,6 +169,14 @@ internal sealed interface AgentEvent {
                 "reasoning=${usage.reasoningTokens}, cache=${usage.cachedTokens}, cache_write=${usage.cacheWriteTokens}"
     }
 
+    data class UserInputRequested(val request: AgentUserInputRequest) : AgentEvent {
+        override fun toLogLine(): String = "user_input_requested questions=${request.questions.size}"
+    }
+
+    data class UserInputAnswered(val answer: AgentUserInputAnswer) : AgentEvent {
+        override fun toLogLine(): String = "user_input_answered"
+    }
+
     data class UserSupplementReceived(
         val index: Int,
         val text: String

@@ -1,6 +1,7 @@
 package io.github.mangi.eta.ui.model
 
 import io.github.mangi.eta.data.model.ReasoningEffort
+import io.github.mangi.eta.agent.runtime.AgentUserInputAnswer
 
 sealed interface AgentHomeAction {
     data object LoadEarlierMessages : AgentHomeAction
@@ -10,10 +11,12 @@ sealed interface AgentHomeAction {
     data class ReasoningEffortChanged(val effort: ReasoningEffort) : AgentHomeAction
     data class ModelSelected(val modelId: String) : AgentHomeAction
     data class SubmitMessage(val text: String) : AgentHomeAction
+    data class SteerMessage(val text: String) : AgentHomeAction
     data class InterruptAndSubmitMessage(val text: String) : AgentHomeAction
     data class SteerQueuedMessage(val id: String) : AgentHomeAction
     data class RecallQueuedMessage(val id: String, val currentDraftText: String) : AgentHomeAction
     data class RemoveQueuedMessage(val id: String) : AgentHomeAction
+    data class AnswerUserInput(val answer: AgentUserInputAnswer) : AgentHomeAction
     data object StopRun : AgentHomeAction
     data class ImageAttached(val uri: String) : AgentHomeAction
     data class RemoveImage(val id: String) : AgentHomeAction

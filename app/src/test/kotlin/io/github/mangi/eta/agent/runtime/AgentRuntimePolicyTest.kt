@@ -16,6 +16,23 @@ import org.junit.Test
 
 class AgentRuntimePolicyTest {
     @Test
+    fun steerAndClarifyPreferencesAreIndependentAndLocallyControlled() {
+        val config = AgentModelClient.ModelConfig(baseUrl = "https://example.invalid", apiKey = "test", model = "test", systemPrompt = "")
+        for (steer in listOf(false, true)) for (clarify in listOf(false, true)) {
+            val prefs = booleanPreferences { key, default ->
+                when (key) {
+                    Prefs.Keys.AGENT_STEER_ENABLED -> steer
+                    Prefs.Keys.AGENT_CLARIFY_ENABLED -> clarify
+                    else -> default
+                }
+            }
+            assertEquals(steer, prefs.getBoolean(Prefs.Keys.AGENT_STEER_ENABLED, true))
+            assertEquals(clarify, AgentRuntimePolicy.constrain(config, AgentRuntimePolicy.permissions(prefs)).clarifyEnabled)
+        }
+        assertTrue(Prefs.Keys.LOCAL_AGENT_KEYS.containsAll(listOf(Prefs.Keys.AGENT_STEER_ENABLED, Prefs.Keys.AGENT_CLARIFY_ENABLED)))
+    }
+
+    @Test
     fun unavailablePreferencesFailClosed() {
         assertEquals(
             AgentRuntimePolicy.Permissions(
@@ -25,6 +42,7 @@ class AgentRuntimePolicyTest {
                 autoCompaction = false,
                 subagentTools = false,
                 virtualDisplay = false,
+                clarify = false,
             ),
             AgentRuntimePolicy.permissions(null),
         )
@@ -61,6 +79,7 @@ class AgentRuntimePolicyTest {
                 autoCompaction = false,
                 subagentTools = false,
                 virtualDisplay = false,
+                clarify = false,
             ),
             AgentRuntimePolicy.permissions(preferences),
         )

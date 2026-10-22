@@ -13,6 +13,18 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36], application = Application::class)
 class AgentRuntimeParallelWireTest {
     @Test
+    fun interactionControlsDoNotAliasActiveRunQueries() {
+        val operations = listOf(
+            AgentRuntimeWire.MSG_QUERY_ACTIVE_RUNS,
+            AgentRuntimeWire.MSG_QUERY_ACTIVE_RUNS_RESPONSE,
+            AgentRuntimeWire.MSG_STEER,
+            AgentRuntimeWire.MSG_ANSWER_USER_INPUT,
+            AgentRuntimeWire.MSG_CONTROL_RESPONSE,
+        )
+        assertEquals(operations.size, operations.distinct().size)
+    }
+
+    @Test
     fun activeRunSnapshotsKeepIndependentIdentityAndPhase() {
         val snapshots = AgentRuntimeWire.RunPhase.entries.mapIndexed { index, phase ->
             AgentRuntimeWire.ActiveRunSnapshot("run-$index", "conversation-$index", phase,

@@ -3,6 +3,8 @@ package io.github.mangi.eta.agent.model
 import io.github.mangi.eta.agent.runtime.AgentEvent
 import io.github.mangi.eta.agent.runtime.AgentRunController
 import io.github.mangi.eta.agent.runtime.AgentTokenUsage
+import io.github.mangi.eta.agent.runtime.AgentUserInputRequest
+import io.github.mangi.eta.agent.runtime.AgentUserInputCodec
 import io.github.mangi.eta.agent.roleplay.RoleplayRunContext
 import io.github.mangi.eta.agent.subagent.AgentSubagentToolCatalog
 import kotlinx.coroutines.Dispatchers
@@ -456,7 +458,21 @@ internal class AgentLoop(
 
         val toolStartMs = monotonicNowMs()
         val result = try {
-            toolExecutor.execute(roundCall)
+            if (roundCall.name == AgentInteractionToolCatalog.REQUEST_USER_INPUT) {
+                check(config.clarifyEnabled && purpose == ProviderRequestPurpose.CHAT)
+                val request = AgentUserInputRequest.fromToolArguments(
+                    "input-${java.util.UUID.randomUUID()}", roundCall.argumentsJson,
+                )
+                val answer = runController.awaitUserInput(request) {
+                    onEvent(AgentEvent.UserInputRequested(request))
+                }
+                onEvent(AgentEvent.UserInputAnswered(answer))
+                AgentModelClient.ToolResult(
+                    JSONObject(AgentUserInputCodec.encode(answer)).put("ok", true).toString(),
+                )
+            } else {
+                toolExecutor.execute(roundCall)
+            }
         } catch (throwable: Exception) {
             runController.throwIfCancelled()
             AgentModelClient.ToolResult(

@@ -54,6 +54,7 @@ internal class AgentTraceFormatter {
             "read_image" -> "查看图片"
             AgentSubagentToolCatalog.TOOL_NAME -> summarizeSubagentArguments(toolCall.argumentsJson)
             AgentSubagentToolCatalog.PROFILE_TOOL_NAME -> summarizeSubagentProfileArguments(toolCall.argumentsJson)
+            AgentInteractionToolCatalog.REQUEST_USER_INPUT -> "等待用户回答"
             AgentConversationToolCatalog.READ_HISTORY -> "读取当前会话历史"
             "memory_get", "character_memory_get", "memory_write", "character_memory_write" ->
                 AgentPersonalResultFormatter.summarizeArguments(toolCall.name, toolCall.argumentsJson) ?: "记忆"
