@@ -22,6 +22,7 @@ import io.github.mangi.eta.agent.overlay.AgentOverlayInteractionDraft
 import io.github.mangi.eta.agent.overlay.AgentOverlayPhase
 import io.github.mangi.eta.agent.overlay.AgentOverlayState
 import io.github.mangi.eta.agent.overlay.AgentOverlayStatus
+import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.ui.components.AgentClarificationPagerState
 import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.ui.app.EtaUiVisibility
@@ -442,6 +443,41 @@ class AgentRuntimeOverlayLifecycleTest {
         assertEquals("pending should remain identical", request, getOverlayState().pendingUserInput)
         assertTrue("overlayRequested should remain true", getField(service, "overlayRequested") as Boolean)
         assertFalse("service should not be stopped", shadowOf(service).isStoppedBySelf)
+    }
+
+    @Test
+    fun replacementRunClearsThePreviousClarificationWindowFocus() = withRecomposerPolicy { pump ->
+        val previous = AgentRuntimeSession("previous-run")
+        setField(service, "activeSession", previous)
+        getInteractionRunId().value = previous.runId
+        setOverlayState(AgentOverlayState(
+            phase = AgentOverlayPhase.RUNNING,
+            status = AgentOverlayStatus.WaitingForUser,
+            pendingUserInput = AgentUserInputRequest("req", listOf(AgentUserInputQuestion("q", "Which?"))),
+        ))
+        invokeMethod(service, "showOverlay")
+        pump()
+        val params = getField(service, "capsuleParams") as WindowManager.LayoutParams
+        assertEquals(0, params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+
+        val request = AgentRuntimeWire.RunRequest(
+            runId = "replacement-run", prompt = "", images = emptyList(),
+            config = AgentModelClient.ModelConfig(
+                baseUrl = "http://127.0.0.1:1", apiKey = "", model = "", systemPrompt = "",
+            ),
+        )
+        invokeMethod(service, "startRun", AgentRuntimeWire.RunRequest::class.java to request, android.os.Messenger::class.java to null)
+
+        try {
+            assertTrue(params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+            assertTrue(params.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0)
+            assertEquals((68 * service.resources.displayMetrics.density).toInt(), params.height)
+            assertEquals(AgentOverlayInteractionDraft.Empty, getInteractionDraft().value)
+            assertEquals("replacement-run", getInteractionRunId().value)
+            assertNull(getOverlayState().pendingUserInput)
+        } finally {
+            (getField(service, "activeSession") as? AgentRuntimeSession)?.controller?.cancel()
+        }
     }
 
     @Test

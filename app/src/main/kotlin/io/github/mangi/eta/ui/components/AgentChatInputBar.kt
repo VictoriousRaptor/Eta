@@ -45,7 +45,7 @@ import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AddComment
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Stop
@@ -152,6 +152,7 @@ internal fun AgentChatInputBar(
     steerEnabled: Boolean = false,
     interactionSubmitting: Boolean = false,
     steerAcknowledgement: SteerAcknowledgement? = null,
+    onSteerAcknowledgementConsumed: (Long) -> Unit = {},
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
     val hapticFeedback = LocalHapticFeedback.current
@@ -175,8 +176,13 @@ internal fun AgentChatInputBar(
     val canSteer = isStreaming && steerEnabled && !interactionSubmitting &&
         textFieldState.text.isNotBlank() && pendingImages.isEmpty() && pendingFileReferences.isEmpty()
     LaunchedEffect(steerAcknowledgement) {
-        if (steerAcknowledgement != null && textFieldState.text.toString().trim() == steerAcknowledgement.text) {
-            textFieldState.clearText()
+        if (steerAcknowledgement != null) {
+            if (!isEditingMessage && inputSyncVersion == steerAcknowledgement.inputSyncVersion &&
+                textFieldState.text.toString().trim() == steerAcknowledgement.text
+            ) {
+                textFieldState.clearText()
+            }
+            onSteerAcknowledgementConsumed(steerAcknowledgement.sequence)
         }
     }
     val density = LocalDensity.current
@@ -215,6 +221,7 @@ internal fun AgentChatInputBar(
             AgentChatQueueStrip(
                 queuedMessages = queuedMessages,
                 isStreaming = isStreaming,
+                steerEnabled = steerEnabled && !isCompacting && !interactionSubmitting,
                 onSteer = onSteerQueuedMessage,
                 onRecall = { id -> onRecallQueuedMessage(id, textFieldState.text.toString()) },
                 onRemove = onRemoveQueuedMessage,
@@ -396,7 +403,7 @@ internal fun AgentChatInputBar(
                             onModelSelected = onModelSelected,
                         )
 
-                        if (isStreaming && steerEnabled) {
+                        if (isStreaming && steerEnabled && textFieldState.text.isNotBlank()) {
                             IconButton(
                                 onClick = {
                                     if (canSteer) {
@@ -409,7 +416,7 @@ internal fun AgentChatInputBar(
                                 minHeight = ChatInputActionSize,
                             ) {
                                 Icon(
-                                    Icons.Rounded.AddComment,
+                                    Icons.Rounded.Bolt,
                                     stringResource(R.string.chat_steer_send),
                                     modifier = Modifier.size(ChatInputActionIconSize),
                                     tint = if (canSteer) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,

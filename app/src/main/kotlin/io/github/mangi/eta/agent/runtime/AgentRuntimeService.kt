@@ -461,7 +461,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         mainHandler.removeCallbacksAndMessages(hideToken)
         state.value = AgentOverlayState.Initial
         capsuleExpanded.value = false
-        setCapsuleWindowHeight(CAPSULE_COLLAPSED_HEIGHT_DP)
+        setCapsuleInputMode(false)
         hasExecutedForegroundTool = false
         hasPresentedClarification = false
         interactionDraft.value = AgentOverlayInteractionDraft.Empty

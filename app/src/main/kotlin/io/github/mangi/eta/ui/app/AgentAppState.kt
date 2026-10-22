@@ -1094,16 +1094,25 @@ internal class AgentAppState(
         submitOrQueueCurrentMessage(submittedText = submittedText, immediateInterrupt = true)
     }
 
-    fun steerQueuedMessage(id: String) {
+    fun consumeSteerAcknowledgement(sequence: Long) {
+        if (homeState.steerAcknowledgement?.sequence != sequence) return
+        updateCurrentConversation(homeState.copy(steerAcknowledgement = null), updateTimestamp = false)
+    }
+
+    fun steerQueuedMessage(id: String, requireActiveRun: Boolean = true) {
         if (!homeState.isConversationLoaded) return
+        if (requireActiveRun) {
+            if (!homeState.isStreaming || homeState.isCompacting || !agentBooleanForUi(Prefs.Keys.AGENT_STEER_ENABLED)) return
+            val queued = homeState.queuedMessages.firstOrNull { it.id == id } ?: return
+            if (queued.immediateInterrupt || queued.content.isBlank() || queued.pendingImages.isNotEmpty() || queued.pendingFileReferences.isNotEmpty()) return
+            submitRunInteraction(prompt = queued.content.trim(), queuedMessage = queued)
+            return
+        }
+        if (homeState.isStreaming || homeState.isCompacting) return
         val (nextState, promoted) = AgentMessageQueueReducer.promoteToInterrupt(homeState, id)
         if (promoted == null) return
         updateCurrentConversation(nextState, updateTimestamp = false)
-        if (nextState.isStreaming && !nextState.isCompacting) {
-            requestInterruptCurrentRun()
-        } else if (!nextState.isStreaming) {
-            dispatchQueuedMessage(selectedConversationId, promoted)
-        }
+        dispatchQueuedMessage(selectedConversationId, promoted)
     }
 
     fun recallQueuedMessage(id: String, currentDraftText: String) {
@@ -1322,21 +1331,49 @@ internal class AgentAppState(
         submitRunInteraction(answer = answer)
     }
 
-    private fun submitRunInteraction(prompt: String? = null, answer: AgentUserInputAnswer? = null) {
+    private fun submitRunInteraction(
+        prompt: String? = null,
+        answer: AgentUserInputAnswer? = null,
+        queuedMessage: QueuedMessageUi? = null,
+    ) {
         val runId = currentRunId ?: return
         val conversationId = conversationIdForRun(runId) ?: return
         if (conversationId != selectedConversationId || homeState.interactionSubmitting) return
-        updateCurrentConversation(homeState.copy(interactionSubmitting = true))
+        val submittedInputVersion = homeState.inputSyncVersion
+        val originalQueue = homeState.queuedMessages
+        // 暂存到本次请求，避免 run 在接收确认前结束时又将同一队列项自动发出；拒绝后放回。
+        updateCurrentConversation(homeState.copy(
+            interactionSubmitting = true,
+            queuedMessages = if (queuedMessage != null) originalQueue.filterNot { it.id == queuedMessage.id } else originalQueue,
+        ))
         scope.launch {
             val accepted = withContext(Dispatchers.IO) {
                 val client = AgentRuntimeClient(appContext, AndroidAgentLogger)
                 if (answer != null) client.answerUserInput(runId, answer) else client.steer(runId, prompt.orEmpty())
             }
-            if (runConversationIds.any { (ownerRunId, ownerConversationId) -> ownerConversationId == conversationId && ownerRunId != runId }) return@launch
+            val runReplaced = runConversationIds.any { (ownerRunId, ownerConversationId) -> ownerConversationId == conversationId && ownerRunId != runId }
+            if (runReplaced && queuedMessage == null) return@launch
             val state = conversationsById[conversationId] ?: return@launch
+            val nextQueue = if (!accepted && queuedMessage != null) {
+                val restoredQueue = state.queuedMessages.toMutableList()
+                val queuedIndex = originalQueue.indexOf(queuedMessage)
+                val successors = originalQueue.drop(queuedIndex + 1).map { it.id }.toSet()
+                val predecessors = originalQueue.take(queuedIndex).map { it.id }.toSet()
+                val nextIndex = restoredQueue.indexOfFirst { it.id in successors }
+                val restoreIndex = if (nextIndex >= 0) nextIndex else restoredQueue.indexOfLast { it.id in predecessors } + 1
+                val interruptIndex = restoredQueue.indexOfLast { it.immediateInterrupt } + 1
+                restoredQueue.add(maxOf(restoreIndex, interruptIndex), queuedMessage)
+                restoredQueue
+            } else state.queuedMessages
             updateConversation(conversationId, state.copy(
-                interactionSubmitting = accepted && answer != null && state.pendingUserInput?.id == answer.requestId,
-                steerAcknowledgement = if (accepted && prompt != null) SteerAcknowledgement(prompt, System.nanoTime()) else state.steerAcknowledgement,
+                interactionSubmitting = if (runReplaced) state.interactionSubmitting else accepted && answer != null && state.pendingUserInput?.id == answer.requestId,
+                queuedMessages = nextQueue,
+                input = if (queuedMessage == null && accepted && prompt != null && state.messageEdit == null && state.inputSyncVersion == submittedInputVersion &&
+                    state.input.trim() == prompt
+                ) "" else state.input,
+                steerAcknowledgement = if (queuedMessage == null && accepted && prompt != null) {
+                    SteerAcknowledgement(prompt, System.nanoTime(), submittedInputVersion)
+                } else state.steerAcknowledgement,
             ), updateTimestamp = false)
             if (!accepted) Toast.makeText(appContext, R.string.interaction_rejected, Toast.LENGTH_SHORT).show()
         }

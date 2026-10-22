@@ -1,7 +1,18 @@
 package io.github.mangi.eta.ui.app
 
 import android.content.Context
+import android.content.ComponentName
+import android.content.ContextWrapper
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.Message
+import android.os.Messenger
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.model.AgentFileReference
+import io.github.mangi.eta.agent.model.AgentFileReferenceKind
 import io.github.mangi.eta.agent.runtime.AgentRuntimeWire
 import io.github.mangi.eta.agent.runtime.AgentUserInputQuestion
 import io.github.mangi.eta.agent.runtime.AgentUserInputRequest
@@ -10,6 +21,10 @@ import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.data.db.ConversationMessageEntity
 import io.github.mangi.eta.ui.model.AgentChatHomeUiState
 import io.github.mangi.eta.ui.model.ConversationHistoryLoadState
+import io.github.mangi.eta.ui.model.SteerAcknowledgement
+import io.github.mangi.eta.ui.model.PendingFileReferenceUi
+import io.github.mangi.eta.ui.model.PendingImageUi
+import io.github.mangi.eta.ui.model.QueuedMessageUi
 import io.github.mangi.eta.ui.model.UserMessageUi
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +51,8 @@ class AgentAppStateConversationLoadingTest {
     private lateinit var context: Context
     private val job = SupervisorJob()
     private val scope = CoroutineScope(job + Dispatchers.Main.immediate)
+    private var simulatedRuntimeConnection: ServiceConnection? = null
+    private val receivedControls = mutableListOf<Pair<String, String>>()
 
     @Before
     fun setUp() {
@@ -48,8 +65,12 @@ class AgentAppStateConversationLoadingTest {
     @After
     fun tearDown() {
         scope.cancel()
-        awaitCondition { job.isCompleted }
-        EtaDatabase.closeForTests()
+        try {
+            awaitCondition { job.isCompleted }
+        } finally {
+            simulatedRuntimeConnection?.onBindingDied(ComponentName(context, "TestRuntime"))
+            EtaDatabase.closeForTests()
+        }
     }
 
     @Test
@@ -86,11 +107,310 @@ class AgentAppStateConversationLoadingTest {
         assertTrue(state.homeState.queuedMessages.isEmpty())
     }
 
-    private fun streamingConversation(): AgentAppState {
+    @Test
+    fun acceptedSupplementClearsTheRecalledSourceDraftAndConsumesOnlyItsOwnAcknowledgement() {
+        val (state, accept) = controlledSteerConversation()
+        state.sendCurrentMessage("supplement")
+        state.recallQueuedMessage(state.homeState.queuedMessages.single().id, "")
+        val version = state.homeState.inputSyncVersion
+
+        state.steerCurrentMessage("supplement")
+        accept()
+
+        assertEquals("", state.homeState.input)
+        assertEquals(version, state.homeState.steerAcknowledgement?.inputSyncVersion)
+        val sequence = requireNotNull(state.homeState.steerAcknowledgement).sequence
+        state.consumeSteerAcknowledgement(sequence - 1)
+        assertEquals(sequence, state.homeState.steerAcknowledgement?.sequence)
+        state.consumeSteerAcknowledgement(sequence)
+        assertEquals(null, state.homeState.steerAcknowledgement)
+        state.consumeSteerAcknowledgement(sequence)
+        assertEquals("", state.homeState.input)
+    }
+
+    @Test
+    fun lateAcceptancePreservesSameTextRecalledAfterTheSubmission() {
+        val (state, accept) = controlledSteerConversation()
+        val submittedVersion = state.homeState.inputSyncVersion
+        state.steerCurrentMessage("supplement")
+        state.sendCurrentMessage("supplement")
+        state.recallQueuedMessage(state.homeState.queuedMessages.single().id, "")
+
+        accept()
+
+        assertEquals("supplement", state.homeState.input)
+        assertTrue(state.homeState.inputSyncVersion > submittedVersion)
+        assertEquals(submittedVersion, state.homeState.steerAcknowledgement?.inputSyncVersion)
+        state.consumeSteerAcknowledgement(requireNotNull(state.homeState.steerAcknowledgement).sequence)
+        assertEquals("supplement", state.homeState.input)
+    }
+
+    @Test
+    fun lateAcceptancePreservesAMatchingMessageThatIsNowBeingEdited() {
+        val (state, accept) = controlledSteerConversation()
+        val content = "first-message-0-end"
+        state.steerCurrentMessage(content)
+        AgentAppState::class.java.getDeclaredMethod(
+            "updateCurrentConversation", AgentChatHomeUiState::class.java, java.lang.Boolean.TYPE,
+        ).apply { isAccessible = true }.invoke(state, state.homeState.copy(isStreaming = false), false)
+        state.beginMessageEdit("first-0")
+
+        accept()
+
+        assertEquals(content, state.homeState.input)
+        assertEquals("first-0", state.homeState.messageEdit?.targetMessageId)
+    }
+
+    @Test
+    fun recalledSameTextSurvivesAnAlreadyConsumedSupplementAndConversationSwitch() {
+        seed("first" to conversation("first"), "second" to conversation("second"))
+        val state = AgentAppState(context, scope)
+        val update = AgentAppState::class.java.getDeclaredMethod(
+            "updateCurrentConversation", AgentChatHomeUiState::class.java, java.lang.Boolean.TYPE,
+        ).apply { isAccessible = true }
+        update.invoke(state, state.homeState.copy(
+            isStreaming = true, steerAcknowledgement = SteerAcknowledgement("supplement", 1, 0),
+        ), false)
+        state.consumeSteerAcknowledgement(1)
+        state.sendCurrentMessage("supplement")
+        update.invoke(state, state.homeState.copy(isStreaming = false), false)
+        state.recallQueuedMessage(state.homeState.queuedMessages.single().id, "")
+
+        state.selectConversation("second")
+        awaitLoaded(state, "second")
+        state.selectConversation("first")
+        awaitLoaded(state, "first")
+
+        assertEquals("supplement", state.homeState.input)
+        assertTrue(state.homeState.queuedMessages.isEmpty())
+        assertEquals(null, state.homeState.steerAcknowledgement)
+    }
+
+    @Test
+    fun disabledSteerDoesNotSubmitOrChangeTheDraftOrPendingClarification() {
+        val state = streamingConversation()
+        val before = state.homeState
+        requireNotNull(Prefs.localAgentPreferences()).edit().putBoolean(Prefs.Keys.AGENT_STEER_ENABLED, false).commit()
+
+        state.steerCurrentMessage("supplement")
+
+        assertEquals(before, state.homeState)
+    }
+
+    @Test
+    fun queueSteerUsesCurrentRunWithoutClearingTheMatchingInputDraftOrAttachments() {
+        val (state, accept) = controlledSteerConversation()
+        state.sendCurrentMessage("supplement")
+        state.sendCurrentMessage("next queued")
+        val target = state.homeState.queuedMessages.first()
+        val remaining = state.homeState.queuedMessages.last()
+        val image = PendingImageUi("image", "uri", "data", "image/png")
+        updateTestState(state, state.homeState.copy(input = "supplement", pendingImages = listOf(image)))
+        val pending = state.homeState.pendingUserInput
+
+        state.steerQueuedMessage(target.id)
+        assertEquals(listOf(remaining), state.homeState.queuedMessages)
+        state.steerQueuedMessage(remaining.id)
+        assertEquals(listOf(remaining), state.homeState.queuedMessages)
+        accept()
+
+        assertEquals(listOf("interaction-run" to "supplement"), receivedControls)
+        assertEquals("interaction-run", AgentAppState::class.java.getDeclaredField("currentRunId").apply { isAccessible = true }.get(state))
+        assertEquals(listOf(remaining), state.homeState.queuedMessages)
+        assertEquals("supplement", state.homeState.input)
+        assertEquals(listOf(image), state.homeState.pendingImages)
+        assertEquals(pending, state.homeState.pendingUserInput)
+        assertEquals(null, state.homeState.steerAcknowledgement)
+        assertTrue(state.homeState.isStreaming)
+    }
+
+    @Test
+    fun rejectedQueueSteerRestoresItsPlaceWithoutOverwritingLaterQueueEdits() {
+        val (state, reject) = controlledSteerConversation(accepted = false)
+        state.sendCurrentMessage("before")
+        state.sendCurrentMessage("steer me")
+        state.sendCurrentMessage("after")
+        val original = state.homeState.queuedMessages
+
+        state.steerQueuedMessage(original[1].id)
+        state.removeQueuedMessage(original[0].id)
+        state.sendCurrentMessage("new queued")
+        reject()
+
+        assertEquals(listOf("steer me", "after", "new queued"), state.homeState.queuedMessages.map { it.content })
+        assertEquals(original[1], state.homeState.queuedMessages.first())
+        assertTrue(state.homeState.queuedMessages.none { it.immediateInterrupt })
+        assertEquals(null, state.homeState.steerAcknowledgement)
+    }
+
+    @Test
+    fun rejectedQueueSteerDoesNotPreemptANewImmediateInterrupt() {
+        val (state, reject) = controlledSteerConversation(accepted = false)
+        state.sendCurrentMessage("steer me")
+        val queued = state.homeState.queuedMessages.single()
+        state.steerQueuedMessage(queued.id)
+        val interrupt = QueuedMessageUi("interrupt", "new task", immediateInterrupt = true)
+        updateTestState(state, AgentMessageQueueReducer.enqueue(state.homeState, interrupt))
+
+        reject()
+
+        assertEquals(listOf(interrupt, queued), state.homeState.queuedMessages)
+    }
+
+    @Test
+    fun acceptedQueueSteerCannotBeAutomaticallySentAgainWhenRunFinishesBeforeAck() {
+        val (state, accept) = controlledSteerConversation()
+        state.sendCurrentMessage("steer me")
+        state.steerQueuedMessage(state.homeState.queuedMessages.single().id)
+        finishInteractionRun(state)
+
+        accept()
+
+        assertEquals(listOf("interaction-run" to "steer me"), receivedControls)
+        assertTrue(state.homeState.queuedMessages.isEmpty())
+        assertFalse(state.homeState.isStreaming)
+        assertEquals(null, AgentAppState::class.java.getDeclaredField("currentRunId").apply { isAccessible = true }.get(state))
+    }
+
+    @Test
+    fun rejectedQueueSteerIsRestoredEvenIfRunFinishesBeforeAck() {
+        val (state, reject) = controlledSteerConversation(accepted = false)
+        state.sendCurrentMessage("steer me")
+        val queued = state.homeState.queuedMessages.single()
+        state.steerQueuedMessage(queued.id)
+        finishInteractionRun(state)
+
+        reject()
+
+        assertEquals(listOf(queued), state.homeState.queuedMessages)
+        assertFalse(state.homeState.isStreaming)
+        assertFalse(state.homeState.interactionSubmitting)
+    }
+
+    @Test
+    fun queueKeepsTextImagesAndFilesAndRecallsThemForEditing() {
+        val (state, _) = controlledSteerConversation()
+        val image = PendingImageUi("image", "uri", "data", "image/png")
+        val file = PendingFileReferenceUi("file", AgentFileReference("doc.txt", "/sdcard/doc.txt", AgentFileReferenceKind.File))
+        requireNotNull(Prefs.localAgentPreferences()).edit().putBoolean(Prefs.Keys.AGENT_TERMINAL_TOOLS, true).commit()
+        updateTestState(state, state.homeState.copy(pendingImages = listOf(image), pendingFileReferences = listOf(file)))
+
+        state.sendCurrentMessage("with attachments")
+        val queued = state.homeState.queuedMessages.single()
+        assertEquals(listOf(image), queued.pendingImages)
+        assertEquals(listOf(file), queued.pendingFileReferences)
+        assertTrue(state.homeState.pendingImages.isEmpty())
+        assertTrue(state.homeState.pendingFileReferences.isEmpty())
+        state.steerQueuedMessage(queued.id)
+        assertEquals(listOf(queued), state.homeState.queuedMessages)
+        assertFalse(state.homeState.interactionSubmitting)
+        state.recallQueuedMessage(queued.id, "new draft")
+
+        assertEquals("new draft\nwith attachments", state.homeState.input)
+        assertEquals(listOf(image), state.homeState.pendingImages)
+        assertEquals(listOf(file), state.homeState.pendingFileReferences)
+        assertTrue(state.homeState.queuedMessages.isEmpty())
+        assertTrue(receivedControls.isEmpty())
+    }
+
+    @Test
+    fun disabledSteerAndStaleQueueActionsCannotInterruptOrStartAnotherRun() {
+        val (state, _) = controlledSteerConversation()
+        state.sendCurrentMessage("queued")
+        val queued = state.homeState.queuedMessages.single()
+        val before = state.homeState
+        requireNotNull(Prefs.localAgentPreferences()).edit().putBoolean(Prefs.Keys.AGENT_STEER_ENABLED, false).commit()
+        state.steerQueuedMessage(queued.id)
+        assertEquals(before, state.homeState)
+        state.steerQueuedMessage(queued.id, requireActiveRun = false)
+        assertEquals(before, state.homeState)
+        requireNotNull(Prefs.localAgentPreferences()).edit().putBoolean(Prefs.Keys.AGENT_STEER_ENABLED, true).commit()
+        updateTestState(state, state.homeState.copy(isStreaming = false))
+        val idle = state.homeState
+        state.steerQueuedMessage(queued.id)
+        assertEquals(idle, state.homeState)
+        assertTrue(receivedControls.isEmpty())
+    }
+
+    @Test
+    fun rejectedOldQueueSteerIsRestoredWithoutChangingANewerRunsDraftOrSubmission() {
+        val (state, reject) = controlledSteerConversation(accepted = false)
+        state.sendCurrentMessage("old queued")
+        val queued = state.homeState.queuedMessages.single()
+        state.steerQueuedMessage(queued.id)
+        AgentAppState::class.java.getDeclaredField("currentRunId").apply { isAccessible = true }.set(state, "new-run")
+        @Suppress("UNCHECKED_CAST")
+        val owners = AgentAppState::class.java.getDeclaredField("runConversationIds").apply { isAccessible = true }
+            .get(state) as MutableMap<String, String>
+        owners["new-run"] = "first"
+        updateTestState(state, state.homeState.copy(input = "new draft", interactionSubmitting = true))
+
+        reject()
+
+        assertEquals(listOf(queued), state.homeState.queuedMessages)
+        assertEquals("new draft", state.homeState.input)
+        assertTrue(state.homeState.interactionSubmitting)
+        assertEquals(null, state.homeState.steerAcknowledgement)
+    }
+
+    private fun updateTestState(state: AgentAppState, next: AgentChatHomeUiState) {
+        AgentAppState::class.java.getDeclaredMethod(
+            "updateCurrentConversation", AgentChatHomeUiState::class.java, java.lang.Boolean.TYPE,
+        ).apply { isAccessible = true }.invoke(state, next, false)
+    }
+
+    private fun finishInteractionRun(state: AgentAppState) {
+        AgentAppState::class.java.getDeclaredMethod(
+            "applyRunResult", String::class.java, AgentRuntimeWire.RunResult::class.java, java.lang.Boolean.TYPE,
+        ).apply { isAccessible = true }.invoke(
+            state, "interaction-run", AgentRuntimeWire.RunResult("interaction-run", true, "done"), false,
+        )
+    }
+
+    private fun controlledSteerConversation(accepted: Boolean = true): Pair<AgentAppState, () -> Unit> {
+        var ready = false
+        var reply: Messenger? = null
+        val messenger = Messenger(object : Handler(Looper.getMainLooper()) {
+            override fun handleMessage(message: Message) {
+                assertEquals(AgentRuntimeWire.MSG_STEER, message.what)
+                receivedControls += AgentRuntimeWire.runIdFromBundle(message.data) to message.data.getString("payload").orEmpty()
+                reply = message.replyTo
+            }
+        })
+        val runtimeContext = object : ContextWrapper(context) {
+            override fun getApplicationContext(): Context = this
+            override fun bindService(intent: Intent, connection: ServiceConnection, flags: Int): Boolean {
+                if (!ready) return false
+                simulatedRuntimeConnection = connection
+                connection.onServiceConnected(ComponentName(this, "TestRuntime"), messenger.binder)
+                return true
+            }
+            override fun unbindService(connection: ServiceConnection) {}
+        }
+        val state = streamingConversation(runtimeContext)
+        AgentAppState::class.java.getDeclaredField("currentRunId").apply { isAccessible = true }.set(state, "interaction-run")
+        @Suppress("UNCHECKED_CAST")
+        val owners = AgentAppState::class.java.getDeclaredField("runConversationIds").apply { isAccessible = true }
+            .get(state) as MutableMap<String, String>
+        owners["interaction-run"] = "first"
+        ready = true
+        val originalJobs = job.children.toSet()
+        return state to {
+            val submissions = job.children.filterNot { it in originalJobs }.toList()
+            awaitCondition { reply != null }
+            requireNotNull(reply).send(Message.obtain(null, AgentRuntimeWire.MSG_CONTROL_RESPONSE).apply {
+                data = Bundle().apply { putBoolean("accepted", accepted) }
+            })
+            reply = null
+            awaitCondition { submissions.all { it.isCompleted } }
+        }
+    }
+
+    private fun streamingConversation(runtimeContext: Context = context): AgentAppState {
         seed("first" to conversation("first"))
         Prefs.initLocal(context)
         requireNotNull(Prefs.localAgentPreferences()).edit().putBoolean(Prefs.Keys.AGENT_STEER_ENABLED, true).commit()
-        val state = AgentAppState(context, scope)
+        val state = AgentAppState(runtimeContext, scope)
         val recovering = AgentAppState::class.java.getDeclaredField("runtimeRecoveryInProgress")
             .apply { isAccessible = true }.get(state) as java.util.concurrent.atomic.AtomicBoolean
         awaitCondition { !recovering.get() }
