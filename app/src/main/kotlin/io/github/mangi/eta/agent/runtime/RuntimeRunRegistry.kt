@@ -1,7 +1,12 @@
 package io.github.mangi.eta.agent.runtime
 
 import io.github.mangi.eta.agent.model.AgentModelClient
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import io.github.mangi.eta.agent.overlay.AgentOverlayInteractionDraft
 import io.github.mangi.eta.agent.overlay.AgentOverlayState
+import io.github.mangi.eta.ui.components.AgentClarificationPagerState
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.CountDownLatch
 
@@ -29,7 +34,25 @@ internal class RuntimeRunRegistry(private val capacity: Int = MAX_ACTIVE_RUNS) {
         @Volatile var preparing: Boolean = true
             private set
         @Volatile var guiStatus: GuiControlStatus? = null
+        var interactionDraft by mutableStateOf(AgentOverlayInteractionDraft.Empty)
+        var overlayRequested: Boolean = false
+        var capsuleExpanded: Boolean = false
+        var hasPresentedClarification: Boolean = false
         var overlayState: AgentOverlayState = AgentOverlayState.Initial
+            set(next) {
+                val previous = field.pendingUserInput
+                val pending = next.pendingUserInput
+                if (pending != null && pending != previous) {
+                    interactionDraft = interactionDraft.copy(
+                        supplementMode = false,
+                        clarificationState = interactionDraft.clarificationState
+                            ?.takeIf { it.request == pending } ?: AgentClarificationPagerState(pending),
+                    )
+                } else if (pending == null && previous != null) {
+                    interactionDraft = interactionDraft.copy(clarificationState = null)
+                }
+                field = next
+            }
         var hasExecutedForegroundTool: Boolean = false
         var completedContext: CompletedContext? = null
         internal var predecessors: List<Run> = emptyList()

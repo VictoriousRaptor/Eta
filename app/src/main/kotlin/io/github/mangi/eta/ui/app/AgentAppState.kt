@@ -33,6 +33,9 @@ import io.github.mangi.eta.agent.runtime.GuiControlStatus
 import io.github.mangi.eta.agent.runtime.AgentConversationIdentity
 import io.github.mangi.eta.agent.runtime.AgentConversationIdentity.archiveConversationId
 import io.github.mangi.eta.agent.browser.BrowserSessionRegistry
+import io.github.mangi.eta.agent.runtime.AgentUserInputAnswer
+import io.github.mangi.eta.agent.runtime.AgentUserInputDisplay
+import io.github.mangi.eta.ui.model.SteerAcknowledgement
 import io.github.mangi.eta.agent.runtime.AgentExecutionService
 import io.github.mangi.eta.agent.runtime.AgentExternalArchivePayload
 import io.github.mangi.eta.agent.runtime.AgentRunArchiveStore
@@ -1135,20 +1138,38 @@ internal class AgentAppState(
         submitOrQueueCurrentMessage(submittedText = submittedText, immediateInterrupt = false)
     }
 
+    fun steerCurrentMessage(submittedText: String) {
+        if (!homeState.isConversationLoaded || !homeState.isStreaming || homeState.isCompacting) return
+        if (homeState.pendingImages.isNotEmpty() || homeState.pendingFileReferences.isNotEmpty()) return
+        val prompt = submittedText.trim()
+        if (prompt.isNotBlank() && agentBooleanForUi(Prefs.Keys.AGENT_STEER_ENABLED)) {
+            submitRunInteraction(prompt = prompt)
+        }
+    }
+
     fun interruptAndSendCurrentMessage(submittedText: String? = null) {
         submitOrQueueCurrentMessage(submittedText = submittedText, immediateInterrupt = true)
     }
 
-    fun steerQueuedMessage(id: String) {
+    fun consumeSteerAcknowledgement(sequence: Long) {
+        if (homeState.steerAcknowledgement?.sequence != sequence) return
+        updateCurrentConversation(homeState.copy(steerAcknowledgement = null), updateTimestamp = false)
+    }
+
+    fun steerQueuedMessage(id: String, requireActiveRun: Boolean = true) {
         if (!homeState.isConversationLoaded) return
+        if (requireActiveRun) {
+            if (!homeState.isStreaming || homeState.isCompacting || !agentBooleanForUi(Prefs.Keys.AGENT_STEER_ENABLED)) return
+            val queued = homeState.queuedMessages.firstOrNull { it.id == id } ?: return
+            if (queued.immediateInterrupt || queued.content.isBlank() || queued.pendingImages.isNotEmpty() || queued.pendingFileReferences.isNotEmpty()) return
+            submitRunInteraction(prompt = queued.content.trim(), queuedMessage = queued)
+            return
+        }
+        if (homeState.isStreaming || homeState.isCompacting) return
         val (nextState, promoted) = AgentMessageQueueReducer.promoteToInterrupt(homeState, id)
         if (promoted == null) return
         updateCurrentConversation(nextState, updateTimestamp = false)
-        if (nextState.isStreaming && !nextState.isCompacting) {
-            requestInterruptCurrentRun()
-        } else if (!nextState.isStreaming) {
-            dispatchQueuedMessage(selectedConversationId, promoted)
-        }
+        dispatchQueuedMessage(selectedConversationId, promoted)
     }
 
     fun recallQueuedMessage(id: String, currentDraftText: String) {
@@ -1362,6 +1383,62 @@ internal class AgentAppState(
         )
     }
 
+    fun answerUserInput(answer: AgentUserInputAnswer) {
+        if (homeState.pendingUserInput?.accepts(answer) != true) return
+        submitRunInteraction(answer = answer)
+    }
+
+    private fun submitRunInteraction(
+        prompt: String? = null,
+        answer: AgentUserInputAnswer? = null,
+        queuedMessage: QueuedMessageUi? = null,
+    ) {
+        val runId = runStore.activeRunId(selectedConversationId) ?: return
+        val conversationId = conversationIdForRun(runId) ?: return
+        if (conversationId != selectedConversationId || homeState.interactionSubmitting) return
+        val submittedInputVersion = homeState.inputSyncVersion
+        val originalQueue = homeState.queuedMessages
+        // 暂存到本次请求，避免 run 在接收确认前结束时又将同一队列项自动发出；拒绝后放回。
+        updateCurrentConversation(homeState.copy(
+            interactionSubmitting = true,
+            queuedMessages = if (queuedMessage != null) originalQueue.filterNot { it.id == queuedMessage.id } else originalQueue,
+        ))
+        scope.launch {
+            val accepted = withContext(Dispatchers.IO) {
+                val client = AgentRuntimeClient(appContext, AndroidAgentLogger)
+                if (answer != null) client.answerUserInput(runId, answer) else client.steer(runId, prompt.orEmpty())
+            }
+            val runReplaced = runStore.activeRunId(conversationId)?.let { it != runId } == true
+            if (runReplaced && queuedMessage == null) return@launch
+            val state = conversationsById[conversationId] ?: return@launch
+            val answeringCurrentRequest = answer != null && state.pendingUserInput?.id == answer.requestId
+            val nextQueue = if (!accepted && queuedMessage != null) {
+                val restoredQueue = state.queuedMessages.toMutableList()
+                val queuedIndex = originalQueue.indexOf(queuedMessage)
+                val successors = originalQueue.drop(queuedIndex + 1).map { it.id }.toSet()
+                val predecessors = originalQueue.take(queuedIndex).map { it.id }.toSet()
+                val nextIndex = restoredQueue.indexOfFirst { it.id in successors }
+                val restoreIndex = if (nextIndex >= 0) nextIndex else restoredQueue.indexOfLast { it.id in predecessors } + 1
+                val interruptIndex = restoredQueue.indexOfLast { it.immediateInterrupt } + 1
+                restoredQueue.add(maxOf(restoreIndex, interruptIndex), queuedMessage)
+                restoredQueue
+            } else state.queuedMessages
+            updateConversation(conversationId, state.copy(
+                interactionSubmitting = if (runReplaced || answer != null && state.pendingUserInput != null && !answeringCurrentRequest) {
+                    state.interactionSubmitting
+                } else accepted && answeringCurrentRequest,
+                queuedMessages = nextQueue,
+                input = if (queuedMessage == null && accepted && prompt != null && state.messageEdit == null && state.inputSyncVersion == submittedInputVersion &&
+                    state.input.trim() == prompt
+                ) "" else state.input,
+                steerAcknowledgement = if (queuedMessage == null && accepted && prompt != null) {
+                    SteerAcknowledgement(prompt, System.nanoTime(), submittedInputVersion)
+                } else state.steerAcknowledgement,
+            ), updateTimestamp = false)
+            if (!accepted) Toast.makeText(appContext, R.string.interaction_rejected, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     fun beginMessageEdit(messageId: String) {
         if (homeState.isStreaming || homeState.messageEdit != null) return
         if (homeState.roleplay != null) {
@@ -1564,6 +1641,9 @@ internal class AgentAppState(
             state.copy(
                 modelId = runModelId,
                 isStreaming = true,
+                pendingUserInput = null,
+                interactionSubmitting = false,
+                steerAcknowledgement = null,
                 history = if (operation == AgentRuntimeWire.OP_REWRITE_REPLY) state.history else history + listOfNotNull(userHistoryMessage),
                 journal = state.journal.ifEmpty { state.history } + listOfNotNull(userHistoryMessage),
                 isCompacting = operation == AgentRuntimeWire.OP_COMPACT,
@@ -1984,6 +2064,35 @@ internal class AgentAppState(
             is AgentEvent.RunStarted -> if (runStore.isStopRequested(runId)) scope.launch(Dispatchers.IO) {
                 AgentRuntimeClient(appContext, AndroidAgentLogger).cancelRun(runId)
             }
+
+            is AgentEvent.UserInputRequested -> {
+                val conversationId = conversationIdForRun(runId) ?: return
+                val state = conversationsById[conversationId] ?: return
+                val id = "clarification-$runId-${event.request.id}"
+                updateConversation(conversationId, state.copy(
+                    pendingUserInput = event.request,
+                    messages = state.messages.filterNot { it.id == id } + AgentMessageUi(
+                        id = id, content = event.request.questions.joinToString("\n\n") { it.question },
+                    ),
+                ))
+                if (persistSupplement) persistConversations()
+            }
+
+            is AgentEvent.UserInputAnswered -> {
+                val conversationId = conversationIdForRun(runId) ?: return
+                val state = conversationsById[conversationId] ?: return
+                val id = "clarification-answer-$runId-${event.answer.requestId}"
+                val answerText = AgentUserInputDisplay.formatAnswer(event.answer, state.pendingUserInput)
+                updateConversation(conversationId, state.copy(
+                    pendingUserInput = state.pendingUserInput.takeUnless { it?.id == event.answer.requestId },
+                    interactionSubmitting = if (state.pendingUserInput?.id == event.answer.requestId) false else state.interactionSubmitting,
+                    messages = state.messages.filterNot { it.id == id } + UserMessageUi(
+                        id = id, content = answerText,
+                    ),
+                ))
+                if (persistSupplement) persistConversations()
+            }
+
             // 流式增量只刷新消息，不推进会话时间戳，也不重算侧栏摘要；其余可见变化两者都更新。
             is AgentEvent.AssistantBlockDelta -> updateMessages(runId, updateTimestamp = false) { messages ->
                 runMessageProjector.applyEvent(runId, event, messages)
@@ -2210,7 +2319,11 @@ internal class AgentAppState(
     private fun setConversationStreaming(runId: String, isStreaming: Boolean) {
         val conversationId = conversationIdForRun(runId) ?: return
         val state = conversationsById[conversationId] ?: return
-        updateConversation(conversationId, state.copy(isStreaming = isStreaming, isCompacting = state.isCompacting && isStreaming))
+        updateConversation(conversationId, state.copy(
+            isStreaming = isStreaming, isCompacting = state.isCompacting && isStreaming,
+            pendingUserInput = state.pendingUserInput.takeIf { isStreaming },
+            interactionSubmitting = state.interactionSubmitting && isStreaming,
+        ))
     }
 
     private fun conversationIdForRun(runId: String): String? = runStore.conversationId(runId)

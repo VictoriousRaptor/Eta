@@ -16,14 +16,19 @@ internal object AgentConversationRevisionReducer {
         val contextWasCompacted: Boolean,
     )
 
+    private const val CLARIFICATION_ANSWER_PREFIX = "clarification-answer-"
+
+    private fun isUserTurn(message: AgentChatMessageUi): Boolean =
+        message is UserMessageUi && !message.id.startsWith(CLARIFICATION_ANSWER_PREFIX)
+
     fun boundary(state: AgentChatUiState, targetMessageId: String): Boundary? {
         val targetIndex = state.messages.indexOfFirst { it.id == targetMessageId }
         if (targetIndex < 0) return null
         val userMessageIndex = (targetIndex downTo 0).firstOrNull { index ->
-            state.messages[index] is UserMessageUi
+            isUserTurn(state.messages[index])
         } ?: return null
         val userMessage = state.messages[userMessageIndex] as UserMessageUi
-        val userMessageIndices = state.messages.indices.filter { state.messages[it] is UserMessageUi }
+        val userMessageIndices = state.messages.indices.filter { isUserTurn(state.messages[it]) }
         val targetUserOrdinal = userMessageIndices.indexOf(userMessageIndex)
         if (targetUserOrdinal < 0) return null
 
