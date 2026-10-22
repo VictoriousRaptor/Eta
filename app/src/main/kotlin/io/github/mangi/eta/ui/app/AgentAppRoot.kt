@@ -390,8 +390,9 @@ fun AgentAppRoot(
                                 is AgentHomeAction.ModelSelected -> agentState.selectModel(action.modelId)
                                 is AgentHomeAction.SubmitMessage -> { requestExecutionNotifications(); agentState.sendCurrentMessage(action.text) }
                                 is AgentHomeAction.SteerMessage -> agentState.steerCurrentMessage(action.text)
+                                is AgentHomeAction.ConsumeSteerAcknowledgement -> agentState.consumeSteerAcknowledgement(action.sequence)
                                 is AgentHomeAction.InterruptAndSubmitMessage -> { requestExecutionNotifications(); agentState.interruptAndSendCurrentMessage(action.text) }
-                                is AgentHomeAction.SteerQueuedMessage -> { requestExecutionNotifications(); agentState.steerQueuedMessage(action.id) }
+                                is AgentHomeAction.SteerQueuedMessage -> { if (!action.requireActiveRun) requestExecutionNotifications(); agentState.steerQueuedMessage(action.id, action.requireActiveRun) }
                                 is AgentHomeAction.RecallQueuedMessage -> agentState.recallQueuedMessage(action.id, action.currentDraftText)
                                 is AgentHomeAction.RemoveQueuedMessage -> agentState.removeQueuedMessage(action.id)
                                 is AgentHomeAction.AnswerUserInput -> agentState.answerUserInput(action.answer)

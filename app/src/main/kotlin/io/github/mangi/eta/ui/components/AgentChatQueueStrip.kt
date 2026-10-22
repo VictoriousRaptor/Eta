@@ -71,6 +71,7 @@ internal fun AgentChatQueueStrip(
     onRecall: (String) -> Unit,
     onRemove: (String) -> Unit,
     modifier: Modifier = Modifier,
+    steerEnabled: Boolean = true,
 ) {
     if (queuedMessages.isEmpty()) return
 
@@ -158,6 +159,7 @@ internal fun AgentChatQueueStrip(
                 QueuedMessageItemActions(
                     item = first,
                     isStreaming = isStreaming,
+                    steerEnabled = steerEnabled,
                     onSteer = { onSteer(first.id) },
                     onRemove = { onRemove(first.id) },
                 )
@@ -207,6 +209,7 @@ internal fun AgentChatQueueStrip(
                         QueuedMessageItemActions(
                             item = item,
                             isStreaming = isStreaming,
+                            steerEnabled = steerEnabled,
                             onSteer = { onSteer(item.id) },
                             onRemove = { onRemove(item.id) },
                         )
@@ -262,21 +265,25 @@ private fun QueuedMessagePreviewText(
 private fun QueuedMessageItemActions(
     item: QueuedMessageUi,
     isStreaming: Boolean,
+    steerEnabled: Boolean,
     onSteer: () -> Unit,
     onRemove: () -> Unit,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (!item.immediateInterrupt) {
+            val enabled = !isStreaming || (steerEnabled && item.content.isNotBlank() &&
+                item.pendingImages.isEmpty() && item.pendingFileReferences.isEmpty())
             IconButton(
                 onClick = onSteer,
+                enabled = enabled,
                 minWidth = QueueActionSize,
                 minHeight = QueueActionSize,
             ) {
                 Icon(
                     imageVector = if (isStreaming) Icons.Rounded.Bolt else Icons.Rounded.ArrowUpward,
-                    contentDescription = stringResource(R.string.chat_queue_steer_now),
+                    contentDescription = stringResource(if (isStreaming) R.string.chat_steer_send else R.string.chat_send),
                     modifier = Modifier.size(15.dp),
-                    tint = MiuixTheme.colorScheme.primary,
+                    tint = if (enabled) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
             }
         }
