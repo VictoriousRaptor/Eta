@@ -408,12 +408,6 @@ internal object AssistantManager {
         val target = Prefs.powerAssistantTarget()
         val autoConfigEnabled = Prefs.isEnabled(Prefs.Keys.ASSISTANT_AUTO_CONFIG)
         when (assistantSelectionAction(autoConfigEnabled, target)) {
-            AssistantSelectionAction.RESTORE_OEM -> scheduleOemAssistantRestoration(
-                context = context,
-                userId = userId,
-                logger = logger,
-                handler = systemHandler,
-            )
             AssistantSelectionAction.CONFIGURE_MANAGED -> scheduleAssistantConfiguration(
                 context = context,
                 userId = userId,
@@ -423,109 +417,6 @@ internal object AssistantManager {
                 rebuildWhenVerified = rebuildWhenVerified,
             )
             AssistantSelectionAction.NONE -> Unit
-        }
-    }
-
-    private fun scheduleOemAssistantRestoration(
-        context: Context,
-        userId: Int?,
-        logger: ModuleLogger,
-        handler: Handler,
-    ): Boolean = handler.post {
-        if (Prefs.powerAssistantTarget() != PowerAssistantTarget.OEM) return@post
-        restoreOemAssistantForUser(
-            context = context,
-            userId = userId ?: resolveCurrentUserId(),
-            logger = logger,
-            handler = handler,
-        )
-    }
-
-    private fun restoreOemAssistantForUser(
-        context: Context,
-        userId: Int,
-        logger: ModuleLogger,
-        handler: Handler,
-    ) {
-        val configurationKey = ConfigurationKey(userId, PowerAssistantTarget.OEM)
-        if (!beginConfiguration(configurationKey)) return
-        try {
-            val managedSettings = hasManagedAssistantSettings(context, userId)
-            val managedRole = hasManagedAssistantRole(context, userId)
-            if (!managedSettings && !managedRole) {
-                finishConfiguration(configurationKey)
-                return
-            }
-
-            if (managedSettings) {
-                updateSecureString(
-                    resolver = context.contentResolver,
-                    key = ModuleConfig.SECURE_ASSISTANT,
-                    targetValue = null,
-                    userId = userId,
-                    forceRefresh = false,
-                )
-                updateSecureString(
-                    resolver = context.contentResolver,
-                    key = ModuleConfig.SECURE_VOICE_INTERACTION_SERVICE,
-                    targetValue = null,
-                    userId = userId,
-                    forceRefresh = false,
-                )
-            }
-
-            if (!managedRole) {
-                completeOemAssistantRestoration(context, userId, logger, roleChanged = false)
-                return
-            }
-            clearAssistantRoleAsync(
-                context = context,
-                userId = userId,
-                logger = logger,
-                handler = handler,
-                configurationKey = configurationKey,
-            ) { roleChanged ->
-                completeOemAssistantRestoration(context, userId, logger, roleChanged)
-            }
-        } catch (exception: Exception) {
-            finishConfiguration(configurationKey)
-            logger.warnThrottled("assistant_oem_restoration_failed") {
-                "AssistantManager: 恢复系统默认助理失败，type=${exception.safeLogType()}"
-            }
-        }
-    }
-
-    private fun completeOemAssistantRestoration(
-        context: Context,
-        userId: Int,
-        logger: ModuleLogger,
-        roleChanged: Boolean,
-    ) {
-        val configurationKey = ConfigurationKey(userId, PowerAssistantTarget.OEM)
-        try {
-            if (Prefs.powerAssistantTarget() != PowerAssistantTarget.OEM) {
-                invalidateVerificationCache()
-                systemContext?.let { schedulePreferenceSelection(it, logger) }
-                return
-            }
-            invalidateVerificationCache()
-            if (hasManagedAssistantRole(context, userId) ||
-                hasManagedAssistantSettings(context, userId)
-            ) {
-                logger.warnThrottled("assistant_oem_restoration_incomplete") {
-                    "AssistantManager: ColorOS 原生助理恢复后仍存在托管绑定"
-                }
-                return
-            }
-            rebuildVoiceInteractionImplementation(
-                logger = logger,
-                userId = userId,
-                force = roleChanged,
-                logFailures = false,
-            )
-            logger.debug { "AssistantManager: 已恢复 ColorOS 原生助理选择" }
-        } finally {
-            finishConfiguration(configurationKey)
         }
     }
 
@@ -666,9 +557,7 @@ internal object AssistantManager {
                 )
             ) {
                 invalidateVerificationCache()
-                if (currentTarget == PowerAssistantTarget.OEM) {
-                    scheduleOemAssistantRestoration(context, userId, logger, handler)
-                } else if (shouldConfigureAssistant(autoConfigEnabled, currentTarget)) {
+                if (shouldConfigureAssistant(autoConfigEnabled, currentTarget)) {
                     scheduleAssistantConfiguration(
                         context = context,
                         userId = userId,
@@ -696,9 +585,7 @@ internal object AssistantManager {
                 )
             ) {
                 invalidateVerificationCache()
-                if (targetAfterWrite == PowerAssistantTarget.OEM) {
-                    scheduleOemAssistantRestoration(context, userId, logger, handler)
-                } else if (shouldConfigureAssistant(autoConfigAfterWrite, targetAfterWrite)) {
+                if (shouldConfigureAssistant(autoConfigAfterWrite, targetAfterWrite)) {
                     scheduleAssistantConfiguration(
                         context = context,
                         userId = userId,
@@ -801,30 +688,6 @@ internal object AssistantManager {
             handler = handler,
             configurationKey = ConfigurationKey(userId, binding.target),
             onFinished = onFinished
-        )
-    }
-
-    private fun clearAssistantRoleAsync(
-        context: Context,
-        userId: Int,
-        logger: ModuleLogger,
-        handler: Handler,
-        configurationKey: ConfigurationKey,
-        onFinished: (Boolean) -> Unit,
-    ) {
-        mutateRoleHoldersAsync(
-            context = context,
-            userId = userId,
-            methodName = "clearRoleHoldersAsUser",
-            baseArgs = arrayOf(
-                ModuleConfig.ASSISTANT_ROLE,
-                0,
-                resolveUserHandle(userId),
-            ),
-            logger = logger,
-            handler = handler,
-            configurationKey = configurationKey,
-            onFinished = onFinished,
         )
     }
 
@@ -970,31 +833,13 @@ internal object AssistantManager {
         return holders.contains(binding.packageName)
     }
 
-    private fun hasManagedAssistantRole(context: Context, userId: Int): Boolean =
-        PowerAssistantTarget.entries.asSequence()
-            .mapNotNull(::assistantBindingFor)
-            .any { hasAssistantRole(context, userId, it) }
-
-    private fun hasManagedAssistantSettings(context: Context, userId: Int): Boolean {
-        val resolver = context.contentResolver
-        val assistant = getSecureStringForUser(resolver, ModuleConfig.SECURE_ASSISTANT, userId)
-        val voiceInteraction = getSecureStringForUser(
-            resolver,
-            ModuleConfig.SECURE_VOICE_INTERACTION_SERVICE,
-            userId,
-        )
-        return PowerAssistantTarget.entries.asSequence()
-            .mapNotNull(::assistantBindingFor)
-            .any { it.componentName == assistant || it.componentName == voiceInteraction }
-    }
-
     private fun roleMutationReachedTarget(
         context: Context,
         userId: Int,
         target: PowerAssistantTarget,
     ): Boolean = assistantBindingFor(target)?.let { binding ->
         hasAssistantRole(context, userId, binding)
-    } ?: !hasManagedAssistantRole(context, userId)
+    } ?: false
 
     private fun hasAssistantSettings(
         context: Context,

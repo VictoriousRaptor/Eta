@@ -57,22 +57,41 @@ class AssistantBindingTest {
     }
 
     @Test
-    fun `preference changes configure managed targets and restore OEM`() {
-        assertEquals(
-            AssistantSelectionAction.CONFIGURE_MANAGED,
-            assistantSelectionAction(true, PowerAssistantTarget.GEMINI),
-        )
-        assertEquals(
-            AssistantSelectionAction.CONFIGURE_MANAGED,
-            assistantSelectionAction(true, PowerAssistantTarget.ETA),
-        )
+    fun `disabled automatic configuration preserves every assistant target`() {
+        for (target in PowerAssistantTarget.entries) {
+            assertEquals(
+                AssistantSelectionAction.NONE,
+                assistantSelectionAction(false, target),
+            )
+        }
+    }
+
+    @Test
+    fun `enabled automatic configuration only configures managed targets`() {
         assertEquals(
             AssistantSelectionAction.NONE,
-            assistantSelectionAction(false, PowerAssistantTarget.GEMINI),
+            assistantSelectionAction(true, PowerAssistantTarget.OEM),
         )
-        assertEquals(
-            AssistantSelectionAction.RESTORE_OEM,
-            assistantSelectionAction(false, PowerAssistantTarget.OEM),
-        )
+        for (target in listOf(PowerAssistantTarget.GEMINI, PowerAssistantTarget.ETA)) {
+            assertEquals(
+                AssistantSelectionAction.CONFIGURE_MANAGED,
+                assistantSelectionAction(true, target),
+            )
+        }
+    }
+
+    @Test
+    fun `switching to OEM invalidates pending managed configuration`() {
+        for (target in listOf(PowerAssistantTarget.GEMINI, PowerAssistantTarget.ETA)) {
+            for (autoConfigEnabled in listOf(false, true)) {
+                assertFalse(
+                    isAssistantConfigurationCurrent(
+                        autoConfigEnabled = autoConfigEnabled,
+                        expectedTarget = target,
+                        currentTarget = PowerAssistantTarget.OEM,
+                    ),
+                )
+            }
+        }
     }
 }

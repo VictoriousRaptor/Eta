@@ -34,16 +34,15 @@ internal fun shouldConfigureAssistant(
 internal enum class AssistantSelectionAction {
     NONE,
     CONFIGURE_MANAGED,
-    RESTORE_OEM,
 }
 
 internal fun assistantSelectionAction(
     autoConfigEnabled: Boolean,
     target: PowerAssistantTarget,
 ): AssistantSelectionAction = when {
-    target == PowerAssistantTarget.OEM -> AssistantSelectionAction.RESTORE_OEM
     shouldConfigureAssistant(autoConfigEnabled, target) ->
         AssistantSelectionAction.CONFIGURE_MANAGED
+    // 系统默认或关闭自动配置时，保留用户已有的默认助理。
     else -> AssistantSelectionAction.NONE
 }
 
