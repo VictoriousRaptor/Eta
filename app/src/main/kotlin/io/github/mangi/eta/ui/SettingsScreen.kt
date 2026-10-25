@@ -103,6 +103,7 @@ import io.github.mangi.eta.ui.components.coui.CouiPreference
 import io.github.mangi.eta.ui.components.coui.CouiScaffoldPage
 import io.github.mangi.eta.ui.components.coui.CouiSettingsIcon
 import io.github.mangi.eta.ui.components.coui.CouiSwitchPreference
+import io.github.mangi.eta.ui.links.AppLinkOpener
 import io.github.mangi.eta.ui.navigation.AppRoute
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -217,7 +218,7 @@ private fun SettingsPageContent(
     val appVersionName = appPackageInfo.versionName.orEmpty()
     val appVersionSummary = "${appPackageInfo.versionName} (${appPackageInfo.longVersionCode})"
     val openUrl: (String) -> Unit = { url ->
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        AppLinkOpener.open(context, url)
     }
     var checkingUpdate by remember { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<AppLatestRelease?>(null) }
@@ -692,6 +693,14 @@ private fun SettingsPageContent(
                         },
                     )
                     CouiIconDivider()
+                    SwitchPref(
+                        context = context, prefs = agentPrefs,
+                        title = stringResource(R.string.settings_open_links_in_app),
+                        summary = stringResource(R.string.settings_open_links_in_app_summary),
+                        key = Prefs.Keys.OPEN_LINKS_IN_APP,
+                        icon = Icons.Rounded.TravelExplore, iconTint = SettingsIconColors.Blue,
+                    )
+                    CouiIconDivider()
                     CouiPreference(
                         title = stringResource(R.string.data_backup_title),
                         icon = {
@@ -1160,6 +1169,13 @@ private fun SettingsPageContent(
                                 )
                             },
                         )
+                        SwitchPref(
+                            context = context, prefs = agentPrefs,
+                            title = stringResource(R.string.settings_open_links_in_app),
+                            summary = stringResource(R.string.settings_open_links_in_app_summary),
+                            key = Prefs.Keys.OPEN_LINKS_IN_APP,
+                            icon = Icons.Rounded.TravelExplore, iconTint = SettingsIconColors.Blue,
+                        )
                         ArrowPreference(
                             title = stringResource(R.string.data_backup_title),
                             startAction = {
@@ -1358,7 +1374,7 @@ private fun SettingsPageContent(
                     confirmText = stringResource(R.string.ui_update_go_download),
                     onConfirm = {
                         availableUpdate = null
-                        openUrl(update.url)
+                        AppLinkOpener.open(context, update.url, openInApp = false)
                     },
                     onDismissRequest = { availableUpdate = null },
                 )
@@ -1375,7 +1391,7 @@ private fun SettingsPageContent(
                         onCancel = { availableUpdate = null },
                         onConfirm = {
                             availableUpdate = null
-                            openUrl(update.url)
+                            AppLinkOpener.open(context, update.url, openInApp = false)
                         },
                     )
                 }
