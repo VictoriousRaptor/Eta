@@ -6,12 +6,15 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.Density
 import io.github.mangi.eta.data.model.AppearanceAccentColor
 import io.github.mangi.eta.data.model.AppearancePaletteStyle
 import io.github.mangi.eta.data.model.AppearanceSettings
 import io.github.mangi.eta.data.model.AppearanceThemeMode
+import io.github.mangi.eta.ui.links.AppUriHandler
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeColorSpec
@@ -76,6 +79,8 @@ fun AgentAppTheme(
     LaunchedEffect(isDark) { onResolvedDarkModeChange(isDark) }
 
     MiuixTheme(colors = themedColors) {
+        val context = LocalContext.current
+        val uriHandler = remember(context) { AppUriHandler(context) }
         val platformDensity = LocalDensity.current
         val appDensity = remember(platformDensity, appearance.interfaceScale, applyInterfaceScale) {
             if (applyInterfaceScale) {
@@ -88,6 +93,7 @@ fun AgentAppTheme(
             }
         }
         CompositionLocalProvider(
+            LocalUriHandler provides uriHandler,
             LocalAppearanceSettings provides appearance,
             LocalBlurEnabled provides appearance.blurEnabled,
             LocalTopBarBlurStyle provides appearance.topBarBlurStyle,

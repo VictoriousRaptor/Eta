@@ -1374,4 +1374,7 @@
   <string name="chat_queue_remove">移除排隊訊息</string>
   <string name="chat_queue_images_only">[%1$d 張圖片]</string>
   <string name="chat_queue_files_only">[%1$d 個檔案]</string>
+  <string name="settings_open_links_in_app">應用程式內開啟網頁</string>
+  <string name="settings_open_links_in_app_summary">使用系統 WebView 開啟連結，關閉後使用系統瀏覽器。</string>
+  <string name="link_browser_title">網頁</string>
 </resources>
