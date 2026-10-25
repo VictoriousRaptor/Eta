@@ -4,8 +4,12 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.widget.Toast
+import androidx.browser.customtabs.CustomTabsClient
+import androidx.browser.customtabs.CustomTabsIntent
+import androidx.browser.customtabs.CustomTabsService
 import androidx.compose.ui.platform.UriHandler
 import io.github.mangi.eta.R
 import io.github.mangi.eta.config.Prefs
@@ -21,14 +25,30 @@ internal object AppLinkOpener {
         url: String,
         openInApp: Boolean = Prefs.isEnabled(Prefs.Keys.OPEN_LINKS_IN_APP),
     ): Intent {
-        val uri = Uri.parse(url)
-        return (if (openInApp && isWebUri(uri)) {
-            Intent(context, LinkWebViewActivity::class.java).setData(uri)
+        val parsedUri = Uri.parse(url)
+        val isWebLink = isWebUri(parsedUri)
+        val uri = if (isWebLink) parsedUri.normalizeScheme() else parsedUri
+        val browserPackage = if (openInApp && isWebLink) customTabsPackage(context) else null
+        return (if (browserPackage != null) {
+            CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .setSendToExternalDefaultHandlerEnabled(false)
+                .build().intent
+                .setPackage(browserPackage)
+                .setData(uri)
         } else {
             Intent(Intent.ACTION_VIEW, uri)
         }).apply {
             if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+    }
+
+    private fun customTabsPackage(context: Context): String? {
+        val providers = context.packageManager.queryIntentServices(
+            Intent(CustomTabsService.ACTION_CUSTOM_TABS_CONNECTION),
+            PackageManager.ResolveInfoFlags.of(0),
+        ).map { it.serviceInfo.packageName }.distinct()
+        return CustomTabsClient.getPackageName(context, providers)
     }
 
     fun open(context: Context, url: String, openInApp: Boolean = Prefs.isEnabled(Prefs.Keys.OPEN_LINKS_IN_APP)) {
