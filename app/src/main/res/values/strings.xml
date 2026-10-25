@@ -1522,6 +1522,5 @@
   <string name="assistant_overlay_settings_reasoning_follow_default">Follow default</string>
   <string name="assistant_overlay_settings_note">Independently configure the model and reasoning level for the floating assistant triggered by the power key or system assistant. For quick everyday tasks, choosing a fast lightweight model with lower or disabled reasoning helps reduce latency and token usage.</string>
   <string name="settings_open_links_in_app">Open webpages in Eta</string>
-  <string name="settings_open_links_in_app_summary">Use System WebView for links. Turn off to use your browser.</string>
-  <string name="link_browser_title">Webpage</string>
+  <string name="settings_open_links_in_app_summary">Browse links in an in-app browser page. Turn off to open them externally.</string>
 </resources>
