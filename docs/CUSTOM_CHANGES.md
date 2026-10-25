@@ -1,6 +1,6 @@
 # custom 相对 upstream/main 的修改
 
-本页记录 custom 的功能差异及同步上游时需要保留的行为。对照基线为 upstream/main `5e9d3a7b5a7b9d348f36222a629d0626a98ccd0b`（3.3.3），说明已包含 2026-10-23 的聊天队列 Steer 兼容修改。这里描述当前源码行为，不表示所有修改均已提交或推送。
+本页记录 custom 的功能差异及同步上游时需要保留的行为。对照基线为 upstream/main `5e9d3a7b5a7b9d348f36222a629d0626a98ccd0b`（3.3.3），说明已包含 2026-10-23 的聊天队列 Steer 兼容修改及保留用户默认数字助理的调整。这里描述当前源码行为，不表示所有修改均已提交或推送。
 
 完整运行架构见 [Agent Runtime](AGENT_RUNTIME.md)。
 
@@ -16,6 +16,7 @@
 | 浮层生命周期 | 补充输入主要保存在组件本地状态 | Eta 前台移除浮层，后台恢复仍活跃且被请求的浮层；Service 保存跨窗口重建的补充和澄清草稿 |
 | 常亮 | 通过运行状态控制聊天页和胶囊 View，暂停/取消/终态关闭动态请求 | 为可见胶囊、结果卡片及系统助手交互窗口保留固定常亮 flag；边框无独立常亮请求 |
 | 历史与恢复 | 已有运行事件、checkpoint、归档及重连投影 | Clarify 请求和回答接入这些链路；历史编辑不把澄清回答误当成新用户任务 |
+| 默认数字助理 | 目标为系统默认/OEM 时，检测到 Eta/Gemini 绑定就自动清理，不受自动设置开关控制 | 系统默认/OEM 保留现有绑定；关闭自动设置时不主动配置默认助理；仅在开关开启且目标为 Eta/Gemini 时自动配置 |
 
 版本号、依赖、Manifest 权限、构建配置和 CI 沿用该上游基线。本地 debug 签名 Release 是构建产物，不构成 custom 新增的生产签名策略。
 
@@ -56,7 +57,7 @@ OAuth/语音入口重建模型配置时保留入口冻结的 `clarifyEnabled`，
 
 ## 浮层、草稿和常亮
 
-进入 Eta 前台时移除胶囊、边框和结果窗口，保留活跃任务与未回答的问题。回到后台，只为仍活跃且此前请求过浮层的 run 重新创建窗口。Clarify 可独立触发展开胶囊；在后台呈现过澄清的任务结束后，也可展示结果卡片，用户从结果卡片回到会话继续。
+进入 Eta 前台时移除胶囊、边框和结果窗口，保留活跃任务与未回答的问题。回到后台，只为仍活跃且此前请求过浮层或仍有待回答澄清的 run 重新创建窗口。Clarify 可临时独立触发展开胶囊；回答后，若此前没有 GUI 浮层需求则移除临时窗口，否则恢复澄清前的展开状态。在后台呈现过澄清的任务结束后，也可展示结果卡片，用户从结果卡片回到会话继续。
 
 浮层草稿由已有 Service 持有，保存补充文字、补充输入模式、Clarify 答案、多选及页码。移除旧 ComposeView 后会创建新实例，组件本地 remember 不能跨该边界；仅设置 SavedStateRegistryOwner 也不能替代保存与恢复交接。因此保留这份纯数据内存状态，无需新增持久化机制或状态容器。新 run、终态及 Service 销毁时清空，旧窗口回调按 run/request ID 拒绝；新 run 同时恢复普通胶囊焦点与高度。
 
@@ -72,7 +73,23 @@ OAuth/语音入口重建模型配置时保留入口冻结的 `clarifyEnabled`，
 | 装饰性高亮边框 | 不申请常亮，胶囊负责同屏交互窗口的请求 |
 | 窗口已移除 | 该窗口不再申请常亮；没有额外 WakeLock 或系统息屏时间修改 |
 
-胶囊和边框可能由 GUI 或 Clarify 触发，并可跨后续思考和暂停保留；它们的可见性不等于当前正在执行 GUI。保持屏幕的请求也不等于 CPU、网络或进程保活保证。若要改为仅运行期间常亮，需明确改变暂停、结果或助手输入期间的行为，不能将固定 flag 当成完全等价的重复代码删除。
+由 GUI 请求的胶囊和边框可跨后续思考和暂停保留；仅由 Clarify 临时触发的窗口在回答后移除。它们的可见性不等于当前正在执行 GUI。保持屏幕的请求也不等于 CPU、网络或进程保活保证。若要改为仅运行期间常亮，需明确改变暂停、结果或助手输入期间的行为，不能将固定 flag 当成完全等价的重复代码删除。
+
+## 默认数字助理：保留用户选择
+
+实现提交：`773a4f0`（`fix(custom): preserve user-selected default assistant`）。同步上游时保留以下行为：
+
+| Eta 设置 | 当前行为 |
+| --- | --- |
+| 长按电源键目标为「系统默认/OEM」，自动设置开启或关闭 | 保留系统现有默认助理，不自动清空绑定，也不自动恢复原厂助理 |
+| 目标为 Eta/Gemini，自动设置关闭 | 保留系统现有默认助理，由用户在系统设置中管理 |
+| 目标为 Eta/Gemini，自动设置开启 | 沿用上游自动配置、校验和刷新对应默认助理的行为 |
+
+删除 OEM 恢复分支及其专用清理代码。设置变化、系统启动完成、用户解锁或切换，以及配置异步回调均不会再因目标为 OEM 而清空 `assistant`、`voice_interaction_service` 或 ASSISTANT Role。用户手动设置的 Gemini 也不会被该分支清理；如需切回原厂助理，需在系统设置中手动选择。
+
+配置期间切到 OEM 或关闭自动设置后，回调会停止后续配置；已经发给 Android 的 Role 请求无法取消，本修改不承诺撤销已发出的请求。开启自动设置且目标为 Eta/Gemini 时，原有强制刷新中临时清空再写回 Secure 配置的行为保留。电源键唤起、圈即搜和聊天/Agent 逻辑未作调整。
+
+`AssistantBindingTest` 覆盖全部目标与自动设置开关组合，以及配置期间切到 OEM 的失效判断；连同 `PowerAssistantTargetTest` 共 10 项测试通过。Debug 构建、Release/R8 构建及 Debug 签名验证通过，尚未验证真机 OEM 行为。
 
 ## 主要代码入口与验证边界
 
@@ -83,5 +100,6 @@ OAuth/语音入口重建模型配置时保留入口冻结的 `clarifyEnabled`，
 | 共用卡片和分页 | [AgentClarificationCard](../app/src/main/kotlin/io/github/mangi/eta/ui/components/AgentClarificationCard.kt)、[AgentClarificationPager](../app/src/main/kotlin/io/github/mangi/eta/ui/components/AgentClarificationPager.kt) |
 | 窗口与服务草稿 | [AgentRuntimeService](../app/src/main/kotlin/io/github/mangi/eta/agent/runtime/AgentRuntimeService.kt)、[AgentOverlayInteractionDraft](../app/src/main/kotlin/io/github/mangi/eta/agent/overlay/AgentOverlayInteractionDraft.kt)、[EtaUiVisibility](../app/src/main/kotlin/io/github/mangi/eta/ui/app/EtaUiVisibility.kt) |
 | 配置冻结与权限 | [AgentRuntimeRequestConfigResolver](../app/src/main/kotlin/io/github/mangi/eta/agent/runtime/AgentRuntimeRequestConfigResolver.kt)、[AgentRuntimePolicy](../app/src/main/kotlin/io/github/mangi/eta/agent/runtime/AgentRuntimePolicy.kt)、[Prefs](../app/src/main/kotlin/io/github/mangi/eta/config/Prefs.kt) |
+| 默认数字助理配置 | [AssistantBinding](../app/src/main/kotlin/io/github/mangi/eta/hook/system/AssistantBinding.kt)、[AssistantManager](../app/src/main/kotlin/io/github/mangi/eta/hook/system/AssistantManager.kt)、[AssistantBindingTest](../app/src/test/kotlin/io/github/mangi/eta/hook/system/AssistantBindingTest.kt) |
 
 定向测试覆盖队列文字/附件与撤回、Steer 接收/拒绝和终态竞态、Clarify 状态、窗口重建恢复及常亮请求。构建、Robolectric 和模拟 Binder 测试不等同于真机 OEM 行为、真实跨进程和模型端到端验收；具体执行结果与 APK 信息保留在每次验证报告中。
