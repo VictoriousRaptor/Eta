@@ -1,6 +1,6 @@
 # custom 相对 upstream/main 的修改
 
-本页记录 custom 的功能差异及同步上游时需要保留的行为。对照基线为 upstream/main `5e9d3a7b5a7b9d348f36222a629d0626a98ccd0b`（3.3.3），说明已包含 2026-10-23 的聊天队列 Steer 兼容修改及保留用户默认数字助理的调整。这里描述当前源码行为，不表示所有修改均已提交或推送。
+本页记录 custom 的功能差异及同步上游时需要保留的行为。对照基线为 upstream/main `de12fc346c8e5b5e064e903097788f19787c3fd7`（3.3.4）。custom 保留上游的多会话并行、GUI 控制权互斥、Gemini Interactions、浏览器会话及恢复逻辑，再适配以下功能。这里描述源码行为，不表示已经推送或完成真机验证。
 
 完整运行架构见 [Agent Runtime](AGENT_RUNTIME.md)。
 
@@ -18,7 +18,15 @@
 | 历史与恢复 | 已有运行事件、checkpoint、归档及重连投影 | Clarify 请求和回答接入这些链路；历史编辑不把澄清回答误当成新用户任务 |
 | 默认数字助理 | 目标为系统默认/OEM 时，检测到 Eta/Gemini 绑定就自动清理，不受自动设置开关控制 | 系统默认/OEM 保留现有绑定；关闭自动设置时不主动配置默认助理；仅在开关开启且目标为 Eta/Gemini 时自动配置 |
 
-版本号、依赖、Manifest 权限、构建配置和 CI 沿用该上游基线。本地 debug 签名 Release 是构建产物，不构成 custom 新增的生产签名策略。
+版本号、Manifest 权限、构建配置和 CI 沿用该上游基线。用户点击链接的 Custom Tabs 功能另引入 AndroidX Browser，开关与回退路径见 [应用内链接](IN_APP_LINKS.md)。本地 debug 签名 Release 是构建产物，不构成 custom 新增的生产签名策略。
+
+## 与上游多会话运行的整合
+
+运行登记与聊天运行状态使用上游的 `RuntimeRunRegistry` 和 `AgentRunStore`。Steer、Clarify、草稿及接收回执均归属于原 run 和会话，切换会话不会改变正在提交的交互目标。迟到的澄清回答和回执不会清理同会话后续问题的提交状态。
+
+浮层优先跟随上游的实际 GUI 控制者，工具名称和参数生成不推断控制权。没有 GUI 控制者时，待回答的澄清可展示临时胶囊；交互草稿与展开状态由各 run 分别保存。澄清不自行取得 GUI 控制权，其他会话事件也不会覆盖当前 GUI 浮层。
+
+Messenger 消息编号沿用上游的多 run 查询协议，custom 的 Steer、Clarify 回答和接收确认另用独立编号，避免自动合并后将查询与交互错误分派。
 
 ## 聊天页：排队、中断与 Steer
 
