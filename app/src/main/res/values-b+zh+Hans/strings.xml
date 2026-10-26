@@ -1456,4 +1456,6 @@
   <string name="chat_queue_remove">移除排队消息</string>
   <string name="chat_queue_images_only">[%1$d 张图片]</string>
   <string name="chat_queue_files_only">[%1$d 个文件]</string>
+  <string name="settings_open_links_in_app">应用内打开网页</string>
+  <string name="settings_open_links_in_app_summary">使用应用内浏览页面打开链接，关闭后交由系统打开。</string>
 </resources>

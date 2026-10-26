@@ -6,6 +6,7 @@ import android.app.Service
 import android.app.ActivityOptions
 import android.app.PendingIntent
 import io.github.mangi.eta.ui.MainActivity
+import io.github.mangi.eta.ui.links.AppUriHandler
 import android.os.Build
 import android.content.Context
 import android.content.Intent
@@ -29,7 +30,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -1234,7 +1237,10 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                 MiuixTheme(colors = if (isNightMode()) darkColorScheme() else lightColorScheme()) {
                     // 部分 ROM 会给 TYPE_ACCESSIBILITY_OVERLAY 分配软件 Canvas；Miuix 的
                     // RuntimeShader 只检查系统版本，因此系统浮层统一使用其普通圆角回退。
-                    CompositionLocalProvider(LocalSquircleEnabled provides false) {
+                    CompositionLocalProvider(
+                        LocalSquircleEnabled provides false,
+                        LocalUriHandler provides remember(context) { AppUriHandler(context) },
+                    ) {
                         content()
                     }
                 }

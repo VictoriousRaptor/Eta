@@ -35,6 +35,7 @@ internal object Prefs {
         const val DOUBLE_FINGER_CIRCLE_TO_SEARCH = "double_finger_circle_to_search"
         const val LOCKSCREEN_VOICE_COMMAND = "lockscreen_voice_command"
         const val SCREEN_ON_VOICE_COMMAND = "screen_on_voice_command"
+        const val OPEN_LINKS_IN_APP = "open_links_in_app"
         const val AGENT_CUSTOM_MODEL = "agent_custom_model"
         const val AGENT_REQUIRE_PREFIX = "agent_require_prefix"
         const val AGENT_TERMINAL_TOOLS = "agent_terminal_tools"
@@ -57,6 +58,7 @@ internal object Prefs {
             DOUBLE_FINGER_CIRCLE_TO_SEARCH to false,
             LOCKSCREEN_VOICE_COMMAND to false,
             SCREEN_ON_VOICE_COMMAND to false,
+            OPEN_LINKS_IN_APP to true,
             AGENT_CUSTOM_MODEL to true,
             AGENT_REQUIRE_PREFIX to false,
             AGENT_TERMINAL_TOOLS to true,
@@ -72,6 +74,7 @@ internal object Prefs {
 
         /** 由 Eta Runtime 最终裁决、不要求 Xposed 框架在线的开关。 */
         val LOCAL_AGENT_KEYS: Set<String> = setOf(
+            OPEN_LINKS_IN_APP,
             AGENT_TERMINAL_TOOLS,
             AGENT_BROWSER_TOOLS,
             AGENT_DEVICE_DIRECT_TOOLS,

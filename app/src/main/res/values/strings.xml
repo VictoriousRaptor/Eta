@@ -1475,4 +1475,6 @@
   <string name="chat_queue_remove">移除排队消息</string>
   <string name="chat_queue_images_only">[%1$d 张图片]</string>
   <string name="chat_queue_files_only">[%1$d 个文件]</string>
+  <string name="settings_open_links_in_app">Open webpages in Eta</string>
+  <string name="settings_open_links_in_app_summary">Browse links in an in-app browser page. Turn off to open them externally.</string>
 </resources>
