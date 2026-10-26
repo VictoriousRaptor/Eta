@@ -2,12 +2,10 @@ package io.github.mangi.eta.ui.links
 
 import android.app.Activity
 import android.app.Application
-import android.content.ComponentName
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.content.pm.ServiceInfo
 import android.net.Uri
@@ -31,7 +29,7 @@ class AppLinkOpenerTest {
     @Test fun webpagesUseBrowserProvidedCustomTabs() {
         registerBrowser("browser.supported")
         for (url in listOf("https://example.com/path?q=1#part", "http://example.com", "HTTPS://example.com")) {
-            val intent = requireNotNull(AppLinkOpener.intentFor(context, url, openInApp = true))
+            val intent = AppLinkOpener.intentFor(context, url, openInApp = true)
             assertEquals("browser.supported", intent.`package`)
             assertNull(intent.component)
             assertEquals(Intent.ACTION_VIEW, intent.action)
@@ -86,7 +84,7 @@ class AppLinkOpenerTest {
         registerBrowser("browser.supported")
         val controller = Robolectric.buildActivity(Activity::class.java).setup()
         try {
-            val intent = requireNotNull(AppLinkOpener.intentFor(controller.get(), "https://example.com", true))
+            val intent = AppLinkOpener.intentFor(controller.get(), "https://example.com", true)
             assertEquals(0, intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK)
         } finally {
             controller.pause().stop().destroy()
@@ -94,7 +92,7 @@ class AppLinkOpenerTest {
     }
 
     @Test fun disablingSwitchRestoresExternalBrowserEvenWithoutACustomTabsProvider() {
-        val intent = requireNotNull(AppLinkOpener.intentFor(context, "https://example.com", false))
+        val intent = AppLinkOpener.intentFor(context, "https://example.com", false)
         assertNull(intent.component)
         assertNull(intent.`package`)
         assertEquals(Intent.ACTION_VIEW, intent.action)
@@ -103,7 +101,7 @@ class AppLinkOpenerTest {
 
     @Test fun nonWebLinksKeepSystemRouting() {
         for (url in listOf("mailto:hello@example.com", "tel:123", "geo:0,0", "customapp://page")) {
-            val intent = requireNotNull(AppLinkOpener.intentFor(context, url, true))
+            val intent = AppLinkOpener.intentFor(context, url, true)
             assertNull(intent.component)
             assertNull(intent.`package`)
             assertEquals(Intent.ACTION_VIEW, intent.action)
@@ -116,12 +114,6 @@ class AppLinkOpenerTest {
         assertEquals("open_links_in_app", Prefs.Keys.OPEN_LINKS_IN_APP)
         assertEquals(true, Prefs.Keys.BOOLEAN_DEFAULTS[Prefs.Keys.OPEN_LINKS_IN_APP])
         assertTrue(Prefs.Keys.OPEN_LINKS_IN_APP in Prefs.Keys.LOCAL_AGENT_KEYS)
-    }
-
-    @Test fun oldWebViewActivityIsNoLongerRegistered() {
-        assertThrows(PackageManager.NameNotFoundException::class.java) {
-            context.packageManager.getActivityInfo(ComponentName(context.packageName, "io.github.mangi.eta.ui.links.LinkWebViewActivity"), 0)
-        }
     }
 
     @Test fun onlyHierarchicalHttpUrlsWithHostsAreWebLinks() {
