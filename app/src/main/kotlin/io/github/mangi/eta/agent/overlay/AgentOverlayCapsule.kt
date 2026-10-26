@@ -102,6 +102,7 @@ internal fun AgentOverlayCapsule(
     onAnswerUserInput: (AgentUserInputAnswer) -> Boolean,
     interactionDraft: AgentOverlayInteractionDraft? = null,
     onDraftChange: ((AgentOverlayInteractionDraft) -> Unit)? = null,
+    canPause: Boolean = true,
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
@@ -300,7 +301,7 @@ internal fun AgentOverlayCapsule(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
                                         ) {
-                                            if (state.phase == AgentOverlayPhase.RUNNING) {
+                                            if (state.phase == AgentOverlayPhase.RUNNING && canPause) {
                                                 CapsuleAction(
                                                     icon = Icons.Rounded.Pause,
                                                     label = stringResource(R.string.overlay_pause),
@@ -359,7 +360,7 @@ internal fun AgentOverlayCapsule(
                                         onClick = { setSupplementMode(true) },
                                     )
                                 }
-                                if (state.phase == AgentOverlayPhase.RUNNING) {
+                                if (state.phase == AgentOverlayPhase.RUNNING && canPause) {
                                     CapsuleAction(
                                         icon = Icons.Rounded.Pause,
                                         label = stringResource(R.string.overlay_pause),

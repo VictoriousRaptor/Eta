@@ -107,6 +107,7 @@ internal class AgentAppState(
     private val pendingConversationDeletes = mutableSetOf<String>()
     private val persistenceLock = Any()
     private var persistenceJob: Job? = null
+    private val settlementJobs = mutableMapOf<String, Job>()
     // 导入期间暂停保存：旧状态的增量保存会删除刚导入的会话；导入成功后整体重载，失败时数据库已回滚。
     private var persistencePaused = false
     private val runtimeRecoveryInProgress = AtomicBoolean(false)
@@ -1408,6 +1409,11 @@ internal class AgentAppState(
                 val client = AgentRuntimeClient(appContext, AndroidAgentLogger)
                 if (answer != null) client.answerUserInput(runId, answer) else client.steer(runId, prompt.orEmpty())
             }
+            if (!accepted && queuedMessage != null) {
+                Toast.makeText(appContext, R.string.interaction_rejected, Toast.LENGTH_SHORT).show()
+                // 旧 run 先排空正常队列，再恢复被拒绝的 Steer，避免把它作为新任务发出。
+                settlementJobs[runId]?.join()
+            }
             val runReplaced = runStore.activeRunId(conversationId)?.let { it != runId } == true
             if (runReplaced && queuedMessage == null) return@launch
             val state = conversationsById[conversationId] ?: return@launch
@@ -1435,7 +1441,7 @@ internal class AgentAppState(
                     SteerAcknowledgement(prompt, System.nanoTime(), submittedInputVersion)
                 } else state.steerAcknowledgement,
             ), updateTimestamp = false)
-            if (!accepted) Toast.makeText(appContext, R.string.interaction_rejected, Toast.LENGTH_SHORT).show()
+            if (!accepted && queuedMessage == null) Toast.makeText(appContext, R.string.interaction_rejected, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -2184,7 +2190,7 @@ internal class AgentAppState(
                 null
             }
         )
-        scope.launch {
+        val settlement = scope.launch {
             val resultSaved = saved.await() && result.contextSnapshotRef.isBlank()
             val stoppedDuringSettlement = runStore.wasStoppedByUser(runId)
             setConversationStreaming(runId, false)
@@ -2213,6 +2219,8 @@ internal class AgentAppState(
                 }
             }
         }
+        settlementJobs[runId] = settlement
+        settlement.invokeOnCompletion { settlementJobs.remove(runId, settlement) }
     }
 
     private fun updateRunTrace(

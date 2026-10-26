@@ -35,6 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,6 +48,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLooper
+import org.robolectric.shadows.ShadowToast
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36], qualifiers = "en-rUS")
@@ -272,17 +274,31 @@ class AgentAppStateConversationLoadingTest {
 
     @Test
     fun rejectedQueueSteerIsRestoredEvenIfRunFinishesBeforeAck() {
-        val (state, reject) = controlledSteerConversation(accepted = false)
+        lateinit var saveMutex: Mutex
+        val saveOwner = Any()
+        val toastCount = ShadowToast.shownToastCount()
+        val (state, reject) = controlledSteerConversation(accepted = false, afterReply = {
+            // The rejection must reach the UI while the real persistence path is still blocked.
+            awaitCondition { ShadowToast.shownToastCount() > toastCount }
+            saveMutex.unlock(saveOwner)
+        })
         state.sendCurrentMessage("steer me")
         val queued = state.homeState.queuedMessages.single()
         state.steerQueuedMessage(queued.id)
-        finishInteractionRun(state)
-
-        reject()
-
-        assertEquals(listOf(queued), state.homeState.queuedMessages)
-        assertFalse(state.homeState.isStreaming)
-        assertFalse(state.homeState.interactionSubmitting)
+        val persistence = AgentAppState::class.java.getDeclaredField("conversationPersistence")
+            .apply { isAccessible = true }.get(state)
+        saveMutex = AgentConversationPersistence::class.java.getDeclaredField("mutex")
+            .apply { isAccessible = true }.get(persistence) as Mutex
+        runBlocking { saveMutex.lock(saveOwner) }
+        try {
+            finishInteractionRun(state)
+            reject()
+            assertEquals(listOf(queued), state.homeState.queuedMessages)
+            assertFalse(state.homeState.isStreaming)
+            assertFalse(state.homeState.interactionSubmitting)
+        } finally {
+            if (saveMutex.holdsLock(saveOwner)) saveMutex.unlock(saveOwner)
+        }
     }
 
     @Test
@@ -457,6 +473,7 @@ class AgentAppStateConversationLoadingTest {
         accepted: Boolean = true,
         controlType: Int = AgentRuntimeWire.MSG_STEER,
         includeSecondConversation: Boolean = false,
+        afterReply: () -> Unit = {},
     ): Pair<AgentAppState, () -> Unit> {
         var ready = false
         var reply: Messenger? = null
@@ -488,6 +505,7 @@ class AgentAppStateConversationLoadingTest {
                 data = Bundle().apply { putBoolean("accepted", accepted) }
             })
             reply = null
+            afterReply()
             awaitCondition { submissions.all { it.isCompleted } }
         }
     }

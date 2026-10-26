@@ -58,8 +58,6 @@ internal class AgentRuntimeRunExecutor(
     data class Outcome(
         val result: AgentRuntimeWire.RunResult,
         val entrySurfaceGuard: EntrySurfaceGuard?,
-        val completedRequest: AgentRuntimeWire.RunRequest? = null,
-        val response: AgentModelClient.ModelResponse.Text? = null,
         val shouldUpdateHost: Boolean,
     )
 
@@ -76,7 +74,6 @@ internal class AgentRuntimeRunExecutor(
         var toolsBinding: AgentRunController.ResourceBinding? = null
         var guiRun: GuiControlCoordinator.RunControl? = null
         var browserBinding: AutoCloseable? = null
-        var response: AgentModelClient.ModelResponse.Text? = null
         var cancelled = false
         var checkpointRecorder: AgentRunCheckpointRecorder? = null
         val timing = AgentRunTiming(AndroidAgentLogger)
@@ -311,7 +308,6 @@ internal class AgentRuntimeRunExecutor(
                     checkpointRecorder,
                 )
             }
-            response = completedResponse
             AgentRuntimeWire.RunResult(
                 runId = request.runId,
                 ok = true,
@@ -416,8 +412,6 @@ internal class AgentRuntimeRunExecutor(
         return Outcome(
             result = result,
             entrySurfaceGuard = entrySurfaceGuard,
-            completedRequest = completedRequest.takeIf { committed },
-            response = response.takeIf { committed },
             shouldUpdateHost = committed,
         )
     }
@@ -429,6 +423,11 @@ internal class AgentRuntimeRunExecutor(
         entrySurfaceGuard: EntrySurfaceGuard?,
         checkpointRecorder: AgentRunCheckpointRecorder?,
     ) {
+        if (event is AgentEvent.UserInputRequested) {
+            check(entrySurfaceGuard?.dismissOnce() != false) {
+                "ENTRY_SURFACE_NOT_READY: 入口窗口关闭未完成，无法显示澄清问题；请重新发起任务"
+            }
+        }
         checkpointRecorder?.accept(event)
         if (!session.emit(event)) return
         if (event !is AgentEvent.GuiControlChanged) archivedEvents?.add(event)
