@@ -43,13 +43,12 @@ internal object AppLinkOpener {
         }
     }
 
-    private fun customTabsPackage(context: Context): String? {
-        val providers = context.packageManager.queryIntentServices(
-            Intent(CustomTabsService.ACTION_CUSTOM_TABS_CONNECTION),
-            PackageManager.ResolveInfoFlags.of(0),
-        ).map { it.serviceInfo.packageName }.distinct()
-        return CustomTabsClient.getPackageName(context, providers)
-    }
+    private fun customTabsPackage(context: Context): String? =
+        CustomTabsClient.getPackageName(context, null)
+            ?: context.packageManager.queryIntentServices(
+                Intent(CustomTabsService.ACTION_CUSTOM_TABS_CONNECTION),
+                PackageManager.ResolveInfoFlags.of(0),
+            ).firstOrNull()?.serviceInfo?.packageName
 
     fun open(context: Context, url: String, openInApp: Boolean = Prefs.isEnabled(Prefs.Keys.OPEN_LINKS_IN_APP)) {
         try {
