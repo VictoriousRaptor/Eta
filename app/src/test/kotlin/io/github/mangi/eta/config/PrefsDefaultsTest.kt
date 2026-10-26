@@ -16,6 +16,7 @@ class PrefsDefaultsTest {
                 Prefs.Keys.DOUBLE_FINGER_CIRCLE_TO_SEARCH to false,
                 Prefs.Keys.LOCKSCREEN_VOICE_COMMAND to false,
                 Prefs.Keys.SCREEN_ON_VOICE_COMMAND to false,
+                Prefs.Keys.OPEN_LINKS_IN_APP to true,
                 Prefs.Keys.AGENT_CUSTOM_MODEL to true,
                 Prefs.Keys.AGENT_REQUIRE_PREFIX to false,
                 Prefs.Keys.AGENT_TERMINAL_TOOLS to true,
@@ -39,6 +40,7 @@ class PrefsDefaultsTest {
     fun localAgentKeysMatchRuntimeOwnedSettings() {
         assertEquals(
             setOf(
+                Prefs.Keys.OPEN_LINKS_IN_APP,
                 Prefs.Keys.AGENT_TERMINAL_TOOLS,
                 Prefs.Keys.AGENT_BROWSER_TOOLS,
                 Prefs.Keys.AGENT_DEVICE_DIRECT_TOOLS,

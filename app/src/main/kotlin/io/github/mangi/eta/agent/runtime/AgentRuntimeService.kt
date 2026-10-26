@@ -368,16 +368,6 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         }
     }
 
-    private fun startRun(
-        request: AgentRuntimeWire.RunRequest,
-        replyTo: Messenger? = null,
-    ): Boolean {
-        val run = admitRun(request, replyTo) ?: return false
-        run.prepared(request)
-        executePreparedRun(run)
-        return true
-    }
-
     private fun admitRun(
         request: AgentRuntimeWire.RunRequest,
         replyTo: Messenger?,
@@ -496,8 +486,13 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             currentPermissions = ::currentRuntimePermissions,
             snapshotRequest = run::snapshotRequest,
             onAcceptedEvent = { event, entrySurfaceGuard ->
-                val entrySurfaceReady = !AgentOverlayVisibilityPolicy.shouldDismissEntrySurfaceFor(event) ||
+                val verifiesEntrySurface = AgentOverlayVisibilityPolicy.shouldDismissEntrySurfaceFor(event) ||
+                    AgentOverlayVisibilityPolicy.shouldRecordForegroundExecution(event, true)
+                val entrySurfaceReady = if (verifiesEntrySurface) {
                     entrySurfaceGuard?.dismissOnce() != false
+                } else {
+                    run.entrySurfaceReady
+                }
                 handleAcceptedRunEvent(run, event, entrySurfaceReady)
             },
             persistArtifacts = ::persistRunArtifacts,
@@ -523,6 +518,10 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         entrySurfaceReady: Boolean,
     ) {
         if (!runs.contains(run)) return
+        if (AgentOverlayVisibilityPolicy.shouldDismissEntrySurfaceFor(event) ||
+            AgentOverlayVisibilityPolicy.shouldRecordForegroundExecution(event, true)) {
+            run.entrySurfaceReady = entrySurfaceReady
+        }
         if (event is AgentEvent.GuiControlChanged) {
             run.guiStatus = event.status
             if (event.status == GuiControlStatus.Acquired) lastGuiOwnerRunId = run.runId
@@ -530,11 +529,12 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         mainHandler.post {
             if (destroyed) return@post
             runCatching {
-                if (AgentOverlayVisibilityPolicy.shouldRecordForegroundExecution(event, entrySurfaceReady)) {
+                if (AgentOverlayVisibilityPolicy.shouldRecordForegroundExecution(event, run.entrySurfaceReady)) {
                     run.hasExecutedForegroundTool = true
                 }
                 run.overlayState = run.overlayState.applyEvent(event)
-                if (entrySurfaceReady && AgentOverlayVisibilityPolicy.shouldRevealFor(event)) {
+                if (event !is AgentEvent.UserInputRequested && run.entrySurfaceReady &&
+                    AgentOverlayVisibilityPolicy.shouldRevealFor(event)) {
                     run.overlayRequested = true
                 }
                 val guiState = guiControl.state.value
@@ -545,12 +545,13 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                     (ownsGui || guiState.ownerRunId == null)) {
                     bindDisplayedRun(run)
                 }
-                if (event is AgentEvent.GuiControlChanged || event is AgentEvent.UserInputRequested ||
-                    event is AgentEvent.UserInputAnswered) {
+                if (event is AgentEvent.UserInputAnswered) {
+                    restoreOverlayAfterClarification(run)
+                } else if (event is AgentEvent.GuiControlChanged || event is AgentEvent.UserInputRequested) {
                     applyGuiControlState(guiState)
                 } else if (displayedRun === run && ownsGui && !run.session.isTerminal) {
                     state.value = run.overlayState
-                    if (entrySurfaceReady) ensureOverlayVisible()
+                    if (run.entrySurfaceReady && run.overlayRequested) ensureOverlayVisible()
                 }
                 publishExecutionState()
             }.onFailure { throwable ->
@@ -602,6 +603,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             run.interactionDraft = AgentOverlayInteractionDraft.Empty
             run.overlayRequested = false
             run.capsuleExpanded = false
+            run.capsuleExpandedBeforeClarification = null
             val guiState = guiControl.state.value
             val nextPending = if (guiState.ownerRunId == null && !guiState.userPaused) pendingInputRun() else null
             if (nextPending != null && nextPending !== run) {
@@ -888,7 +890,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         )
         if (displayedRun === run) {
             state.value = run.overlayState
-            setCapsuleInputMode(false)
+            restoreOverlayAfterClarification(run)
         }
         return true
     }
@@ -898,18 +900,8 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         if (supplementText.isBlank() || supplementText.length > 32000) return false
         val run = displayedRun?.takeIf { it.runId == runId } ?: return false
         if (guiControl.state.value.userPaused && guiControl.state.value.ownerRunId == null) return false
-        if (runs.get(run.runId) === run) return steerRun(run.runId, supplementText)
-        val completed = run.completedContext ?: return false
-        if (completed.request.operation != AgentRuntimeWire.OP_CHAT ||
-            completed.request.handoff?.source != AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE) {
-            state.value = state.value.copy(status = AgentOverlayStatus.ContinuationUnavailable)
-            return false
-        }
-        return startRun(AgentContinuationBuilder.build(
-            request = completed.request,
-            response = completed.response,
-            supplement = supplementText,
-        ))
+        if (runs.get(run.runId) !== run) return false
+        return steerRun(run.runId, supplementText)
     }
 
     private fun ensureOverlayVisible() {
@@ -926,8 +918,11 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun pendingInputRun(): RuntimeRunRegistry.Run? =
-        displayedRun?.takeIf { runs.contains(it) && !it.session.isTerminal && it.overlayState.pendingUserInput != null }
-            ?: runs.all().firstOrNull { !it.session.isTerminal && it.overlayState.pendingUserInput != null && it.overlayRequested }
+        displayedRun?.takeIf {
+            runs.contains(it) && !it.session.isTerminal && it.entrySurfaceReady && it.overlayState.pendingUserInput != null
+        } ?: runs.all().firstOrNull {
+            !it.session.isTerminal && it.entrySurfaceReady && it.overlayState.pendingUserInput != null
+        }
 
     private fun applyGuiControlState(guiState: GuiControlCoordinator.State) {
         if (destroyed) return
@@ -936,6 +931,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             bindDisplayedRun(owner)
             AgentHapticFeedback.perform(this, AgentHapticFeedback.Type.RUN_STARTED)
         }
+        if (owner?.entrySurfaceReady == true) owner.overlayRequested = true
         when {
             guiState.userPaused -> {
                 state.value = (owner?.overlayState ?: AgentOverlayState.Initial).copy(
@@ -944,10 +940,11 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                     detailText = "手机操作已暂停",
                 )
                 owner?.overlayState = state.value
-                ensureOverlayVisible()
+                if (owner == null || owner.entrySurfaceReady &&
+                    (owner.overlayRequested || owner.overlayState.pendingUserInput != null)) ensureOverlayVisible()
+                else removeAmbientWindows()
             }
             owner != null -> {
-                owner.overlayRequested = true
                 if (owner.overlayState.phase == AgentOverlayPhase.PAUSED) {
                     owner.overlayState = owner.overlayState.copy(
                         phase = AgentOverlayPhase.RUNNING,
@@ -956,7 +953,10 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                     )
                 }
                 state.value = owner.overlayState
-                ensureOverlayVisible()
+                // 所有权的 StateFlow 可能先于入口关闭确认；只投影已获准显示的运行。
+                if (owner.entrySurfaceReady &&
+                    (owner.overlayRequested || owner.overlayState.pendingUserInput != null)) ensureOverlayVisible()
+                else removeAmbientWindows()
             }
             else -> {
                 val pending = pendingInputRun()
@@ -1207,7 +1207,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun dismissResult(run: RuntimeRunRegistry.Run?) {
-        if (run != null && displayedRun === run && lastGuiOwnerRunId == run.runId &&
+        if (run != null && displayedRun === run && run.session.isTerminal &&
             guiControl.state.value.ownerRunId == null && !guiControl.state.value.userPaused) dismissAndStop()
     }
 
@@ -1360,6 +1360,21 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         )
     }
 
+    private fun restoreOverlayAfterClarification(run: RuntimeRunRegistry.Run) {
+        if (displayedRun !== run) return
+        state.value = run.overlayState
+        capsuleExpanded.value = run.capsuleExpanded
+        val guiState = guiControl.state.value
+        if (guiState.ownerRunId != null && guiState.ownerRunId != run.runId ||
+            guiState.ownerRunId == null && !guiState.userPaused && pendingInputRun() != null) {
+            applyGuiControlState(guiState)
+        } else if (run.overlayRequested && run.entrySurfaceReady) {
+            ensureOverlayVisible()
+        } else {
+            removeAmbientWindows()
+        }
+    }
+
     private fun setCapsuleInputMode(focusable: Boolean) {
         val clarify = state.value.pendingUserInput != null
         val effectiveFocusable = focusable || clarify
@@ -1402,6 +1417,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             it.interactionDraft = AgentOverlayInteractionDraft.Empty
             it.overlayRequested = false
             it.capsuleExpanded = false
+            it.capsuleExpandedBeforeClarification = null
             it.hasPresentedClarification = false
         }
         if (AgentOverlayVisibilityPolicy.shouldShowResultCard(
@@ -1436,7 +1452,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         val owner = guiState.ownerRunId?.let(runs::get)
         val run = owner ?: if (!guiState.userPaused) pendingInputRun() ?: displayedRun else displayedRun
         if (run != null && AgentOverlayVisibilityPolicy.shouldRestoreFor(
-                activeRun = runs.contains(run) && !run.session.isTerminal,
+                activeRun = runs.contains(run) && !run.session.isTerminal && run.entrySurfaceReady,
                 overlayRequested = run.overlayRequested || run.overlayState.pendingUserInput != null,
                 appVisible = false,
             )) {

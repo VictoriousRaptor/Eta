@@ -37,11 +37,16 @@ internal class RuntimeRunRegistry(private val capacity: Int = MAX_ACTIVE_RUNS) {
         var interactionDraft by mutableStateOf(AgentOverlayInteractionDraft.Empty)
         var overlayRequested: Boolean = false
         var capsuleExpanded: Boolean = false
+        var capsuleExpandedBeforeClarification: Boolean? = null
         var hasPresentedClarification: Boolean = false
+        @Volatile var entrySurfaceReady: Boolean = initialRequest.handoff?.dismissEntrySurfaceOnForegroundOperation != true
         var overlayState: AgentOverlayState = AgentOverlayState.Initial
             set(next) {
                 val previous = field.pendingUserInput
                 val pending = next.pendingUserInput
+                if (previous == null && pending != null) {
+                    capsuleExpandedBeforeClarification = capsuleExpanded
+                }
                 if (pending != null && pending != previous) {
                     interactionDraft = interactionDraft.copy(
                         supplementMode = false,
@@ -50,6 +55,8 @@ internal class RuntimeRunRegistry(private val capacity: Int = MAX_ACTIVE_RUNS) {
                     )
                 } else if (pending == null && previous != null) {
                     interactionDraft = interactionDraft.copy(clarificationState = null)
+                    capsuleExpanded = capsuleExpandedBeforeClarification ?: capsuleExpanded
+                    capsuleExpandedBeforeClarification = null
                 }
                 field = next
             }

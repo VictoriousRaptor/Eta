@@ -282,6 +282,134 @@ class AgentRuntimeOverlayLifecycleTest {
     }
 
     @Test
+    fun answeredClarificationRemovesTemporaryWindowsAndDoesNotRestoreThemInBackground() = withRecomposerPolicy { pump ->
+        val run = run("temporary-clarify")
+        val request = waiting("request").pendingUserInput!!
+        event(run, AgentEvent.UserInputRequested(request))
+        pump()
+        val capsule = field("capsuleView") as View
+        val glow = field("glowView") as View
+        event(run, AgentEvent.UserInputAnswered(AgentUserInputAnswer(request.id, mapOf("q" to "答案"))))
+        pump()
+        assertFalse(capsule.isAttachedToWindow)
+        assertFalse(glow.isAttachedToWindow)
+        assertNull(field("capsuleView"))
+        assertFalse(run.overlayRequested)
+        assertTrue(registry.contains(run))
+
+        val activity = TestActivity()
+        tracker.onActivityStarted(activity)
+        pump()
+        tracker.onActivityStopped(activity)
+        pump()
+        assertNull(field("capsuleView"))
+        assertFalse(shadowOf(service).isStoppedBySelf)
+    }
+
+    @Test
+    fun answeredClarificationRestoresPreviousExpansionAndWindowFlags() = withRecomposerPolicy { pump ->
+        val run = run("existing-capsule")
+        run.overlayRequested = true
+        present(run)
+        invoke("showOverlay")
+        pump()
+        val capsule = field("capsuleView") as View
+        val params = field("capsuleParams") as WindowManager.LayoutParams
+        val flagsBeforeClarification = params.flags
+        for (wasExpanded in listOf(false, true)) {
+            run.capsuleExpanded = wasExpanded
+            expanded().value = wasExpanded
+            invoke("setCapsuleInputMode", Boolean::class.javaPrimitiveType!! to false)
+            val request = waiting("request-$wasExpanded").pendingUserInput!!
+            event(run, AgentEvent.UserInputRequested(request))
+            pump()
+            assertTrue(expanded().value)
+            event(run, AgentEvent.UserInputAnswered(AgentUserInputAnswer(request.id, mapOf("q" to "答案"))))
+            pump()
+            assertSame(capsule, field("capsuleView"))
+            assertTrue(capsule.isAttachedToWindow)
+            assertEquals(wasExpanded, expanded().value)
+            assertEquals(flagsBeforeClarification, params.flags)
+            assertEquals(dp(if (wasExpanded) 124 else 68), params.height)
+        }
+    }
+
+    @Test
+    fun clarificationAnsweredInForegroundDoesNotCreateOverlayWhenLeavingEta() = withRecomposerPolicy { pump ->
+        val run = run("foreground-clarify")
+        val activity = TestActivity()
+        tracker.onActivityStarted(activity)
+        pump()
+        val request = waiting("request").pendingUserInput!!
+        event(run, AgentEvent.UserInputRequested(request))
+        pump()
+        event(run, AgentEvent.UserInputAnswered(AgentUserInputAnswer(request.id, mapOf("q" to "答案"))))
+        pump()
+        tracker.onActivityStopped(activity)
+        pump()
+        assertNull(field("capsuleView"))
+        assertFalse(run.overlayRequested)
+    }
+
+    @Test
+    fun guiOwnershipWaitsForSuccessfulEntryDismissalBeforeShowingOverlay() = withRecomposerPolicy { pump ->
+        val run = run("external-owner", dismissEntrySurface = true)
+        val control = gui.openRun(run.runId, run.session.controller)
+        try {
+            control.withAction { }
+            pump()
+            assertNull("StateFlow ownership alone must not reveal the entry overlay", field("capsuleView"))
+
+            event(run, AgentEvent.GuiControlChanged(GuiControlStatus.Acquired), entrySurfaceReady = false)
+            pump()
+            assertNull(field("capsuleView"))
+            assertFalse(run.overlayRequested)
+            event(run, AgentEvent.ToolFinished(1, "tap", "tap", "entry dismissal failed", 0, 0, success = false))
+            pump()
+            assertNull(field("capsuleView"))
+            assertFalse(run.hasExecutedForegroundTool)
+
+            event(run, AgentEvent.GuiControlChanged(GuiControlStatus.Acquired), entrySurfaceReady = true)
+            pump()
+            assertNotNull(field("capsuleView"))
+        } finally {
+            control.close()
+        }
+    }
+
+    @Test
+    fun terminalCapturedRunSupplementDoesNotStartNewTask() {
+        val run = run("finished")
+        present(run)
+        run.session.complete(AgentRuntimeWire.RunResult(run.runId, true, "完成"))
+        registry.finish(run.runId, run.session)
+        // If a regression starts execution, validation rejects this local fixture before any network request.
+        run.completedContext = RuntimeRunRegistry.CompletedContext(
+            request = run.request.copy(config = run.request.config.copy(baseUrl = "")),
+            response = AgentModelClient.ModelResponse.Text("完成"),
+        )
+        assertFalse(invoke("requestSupplement", String::class.java to run.runId, String::class.java to "迟到的旧回调") as Boolean)
+        assertTrue(registry.all().isEmpty())
+        assertNull(field("capsuleView"))
+    }
+
+    @Test
+    fun clarifyOnlyResultCardCanBeDismissedWithoutGuiOwnershipHistory() = withRecomposerPolicy { pump ->
+        val run = run("clarify-result")
+        event(run, AgentEvent.UserInputRequested(waiting("request").pendingUserInput!!))
+        pump()
+        complete(run, true)
+        pump()
+        assertNotNull(field("resultCardView"))
+        assertNull(field("lastGuiOwnerRunId"))
+        invoke("dismissResult", RuntimeRunRegistry.Run::class.java to run)
+        pump()
+        assertNull(field("resultCardView"))
+        assertNull(field("displayedRun"))
+        assertTrue(shadowOf(service).isStoppedBySelf)
+    }
+
+    @Test
     fun clarificationCanDisplayWithoutAcquiringGuiControl() = withRecomposerPolicy { pump ->
         val run = run("clarify")
         event(run, AgentEvent.UserInputRequested(waiting("request").pendingUserInput!!))
@@ -378,12 +506,12 @@ class AgentRuntimeOverlayLifecycleTest {
         assertFalse(worker.isAlive)
     }
 
-    private fun run(id: String): RuntimeRunRegistry.Run {
+    private fun run(id: String, dismissEntrySurface: Boolean = false): RuntimeRunRegistry.Run {
         val request = AgentRuntimeWire.RunRequest(
             runId = id, prompt = "测试",
             config = AgentModelClient.ModelConfig(baseUrl = "https://example.invalid", apiKey = "test", model = "test", systemPrompt = ""),
             images = emptyList(),
-            handoff = AgentRuntimeWire.EntryHandoff(id, AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE, id),
+            handoff = AgentRuntimeWire.EntryHandoff(id, AgentRuntimeWire.AGENT_UI_HANDOFF_SOURCE, id, dismissEntrySurface),
         )
         return (registry.admit(request) { RuntimeRunRegistry.Run(request, AgentRuntimeSession(id)) }
             as RuntimeRunRegistry.Admission.Accepted).run.also { it.prepared(request) }
@@ -401,8 +529,9 @@ class AgentRuntimeOverlayLifecycleTest {
         state.value = run.overlayState
     }
 
-    private fun event(run: RuntimeRunRegistry.Run, event: AgentEvent) {
-        invoke("handleAcceptedRunEvent", RuntimeRunRegistry.Run::class.java to run, AgentEvent::class.java to event, Boolean::class.javaPrimitiveType!! to true)
+    private fun event(run: RuntimeRunRegistry.Run, event: AgentEvent, entrySurfaceReady: Boolean = true) {
+        invoke("handleAcceptedRunEvent", RuntimeRunRegistry.Run::class.java to run, AgentEvent::class.java to event,
+            Boolean::class.javaPrimitiveType!! to entrySurfaceReady)
     }
 
     private fun complete(run: RuntimeRunRegistry.Run, ok: Boolean) {
