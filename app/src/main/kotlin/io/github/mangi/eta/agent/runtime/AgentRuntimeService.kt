@@ -522,14 +522,6 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         postTerminalOverlay(
             run = run,
             result = outcome.result,
-            completedContext = outcome.response?.let { completedResponse ->
-                outcome.completedRequest?.let { completedRequest ->
-                    RuntimeRunRegistry.CompletedContext(
-                        request = completedRequest,
-                        response = completedResponse,
-                    )
-                }
-            },
         )
     }
 
@@ -601,11 +593,9 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     private fun postTerminalOverlay(
         run: RuntimeRunRegistry.Run,
         result: AgentRuntimeWire.RunResult,
-        completedContext: RuntimeRunRegistry.CompletedContext? = null,
     ) {
         mainHandler.post {
             if (destroyed) return@post
-            run.completedContext = completedContext
             val finalState = if (result.ok) {
                 run.overlayState.copy(
                     phase = AgentOverlayPhase.FINISHED,
@@ -1033,7 +1023,6 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     private fun bindDisplayedRun(run: RuntimeRunRegistry.Run) {
         if (displayedRun === run) return
         removeOverlayWindows()
-        displayedRun?.takeIf { it.session.isTerminal }?.completedContext = null
         displayedRun = run
         state.value = run.overlayState
         capsuleExpanded.value = run.capsuleExpanded
@@ -1069,7 +1058,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             run?.capsuleExpanded = true
         }
         if (capsuleView != null) {
-            setCapsuleInputMode(run?.interactionDraft?.supplementMode == true)
+            if (state.value.pendingUserInput != null) setCapsuleInputMode(false)
             return
         }
         if (AgentAccessibilityService.current() == null && !Settings.canDrawOverlays(this)) return
@@ -1095,6 +1084,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             }
         }
         val capsule = createOverlayComposeView {
+            val guiOwnerRunId = guiControl.state.collectAsState().value.ownerRunId
             key(run?.runId) {
                 AgentOverlayCapsule(
                     state = state.value,
@@ -1124,6 +1114,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                     onAnswerUserInput = { answer ->
                         run != null && displayedRun === run && answerRunUserInput(run.runId, answer)
                     },
+                    canPause = run != null && guiOwnerRunId == run.runId,
                     interactionDraft = run?.interactionDraft ?: AgentOverlayInteractionDraft.Empty,
                     onDraftChange = { nextDraft ->
                         if (run != null && displayedRun === run && runs.contains(run) &&
@@ -1510,6 +1501,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
             guiState.ownerRunId == null && !guiState.userPaused && pendingInputRun() != null) {
             applyGuiControlState(guiState)
         } else if (run.overlayRequested && run.entrySurfaceReady) {
+            setCapsuleInputMode(run.interactionDraft.supplementMode)
             ensureOverlayVisible()
         } else {
             removeAmbientWindows()
@@ -1614,8 +1606,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun dismissAndStop() {
-        // stopSelf 不会销毁仍被客户端绑定的服务；窗口关闭后不再保留完整请求与结果历史。
-        displayedRun?.completedContext = null
+        // stopSelf 不会销毁仍被客户端绑定的服务；窗口关闭后释放已显示的运行。
         displayedRun = null
         removeOverlayWindows()
         if (runs.all().isEmpty() && !guiControl.state.value.userPaused) {

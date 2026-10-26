@@ -14,7 +14,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [36], application = Application::class)
 class AgentRuntimeServiceRetentionTest {
     @Test
-    fun dismissReleasesContinuationHistoryBeforeTheServiceIsDestroyed() {
+    fun dismissReleasesDisplayedRunBeforeTheServiceIsDestroyed() {
         val controller = Robolectric.buildService(AgentRuntimeService::class.java).create()
         try {
             val service = controller.get()
@@ -30,9 +30,7 @@ class AgentRuntimeServiceRetentionTest {
                 images = emptyList(),
                 history = listOf(AgentModelClient.ConversationMessage("user", "已完成的历史")),
             )
-            val run = RuntimeRunRegistry.Run(request, AgentRuntimeSession(request.runId)).apply {
-                completedContext = RuntimeRunRegistry.CompletedContext(request, AgentModelClient.ModelResponse.Text("完成"))
-            }
+            val run = RuntimeRunRegistry.Run(request, AgentRuntimeSession(request.runId))
             val retainedRun = AgentRuntimeService::class.java.getDeclaredField("displayedRun").apply {
                 isAccessible = true
             }
@@ -44,7 +42,6 @@ class AgentRuntimeServiceRetentionTest {
             }.invoke(service)
 
             assertNull(retainedRun.get(service))
-            assertNull(run.completedContext)
         } finally {
             controller.destroy()
         }

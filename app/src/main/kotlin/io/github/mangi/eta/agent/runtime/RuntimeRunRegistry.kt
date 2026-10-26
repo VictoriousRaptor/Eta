@@ -1,6 +1,5 @@
 package io.github.mangi.eta.agent.runtime
 
-import io.github.mangi.eta.agent.model.AgentModelClient
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -61,7 +60,6 @@ internal class RuntimeRunRegistry(private val capacity: Int = MAX_ACTIVE_RUNS) {
                 field = next
             }
         var hasExecutedForegroundTool: Boolean = false
-        var completedContext: CompletedContext? = null
         internal var predecessors: List<Run> = emptyList()
         private val terminal = CountDownLatch(1)
 
@@ -147,11 +145,6 @@ internal class RuntimeRunRegistry(private val capacity: Int = MAX_ACTIVE_RUNS) {
             },
         )
     }
-
-    data class CompletedContext(
-        val request: AgentRuntimeWire.RunRequest,
-        val response: AgentModelClient.ModelResponse.Text,
-    )
 
     private val lock = Any()
     private val runs = linkedMapOf<String, Run>()

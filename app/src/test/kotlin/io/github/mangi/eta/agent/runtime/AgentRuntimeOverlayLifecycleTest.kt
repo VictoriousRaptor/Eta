@@ -14,10 +14,16 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.MotionDurationScale
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.InfiniteAnimationPolicy
 import androidx.compose.ui.platform.WindowRecomposerFactory
 import androidx.compose.ui.platform.WindowRecomposerPolicy
 import androidx.compose.ui.platform.createLifecycleAwareWindowRecomposer
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsOwner
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.model.AgentModelClient
 import io.github.mangi.eta.agent.overlay.AgentOverlayInteractionDraft
 import io.github.mangi.eta.agent.overlay.AgentOverlayPhase
@@ -158,6 +164,38 @@ class AgentRuntimeOverlayLifecycleTest {
         assertTrue(params.height > dp(124))
         assertEquals(0, params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
         assertTrue(params.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0)
+    }
+
+    @Test
+    fun repeatedOverlayShowWaitsForCollapseAnimationBeforeShrinkingWindow() = withRecomposerPolicy { pump ->
+        val run = run("collapse")
+        present(run)
+        invoke("showOverlay")
+        pump()
+        invoke("toggleCapsule")
+        pump()
+        invoke("toggleCapsule")
+        invoke("showOverlay")
+        assertEquals(dp(124), (field("capsuleParams") as WindowManager.LayoutParams).height)
+        invoke("onCapsuleCollapsedSettled")
+        assertEquals(dp(68), (field("capsuleParams") as WindowManager.LayoutParams).height)
+    }
+
+    @Test
+    fun clarificationOnlyOffersPauseWhenItsRunOwnsGuiControl() = withRecomposerPolicy { pump ->
+        val run = run("clarify-pause")
+        event(run, AgentEvent.UserInputRequested(waiting("request").pendingUserInput!!))
+        pump()
+        assertFalse(capsuleHasAction(R.string.overlay_pause))
+        assertTrue(capsuleHasAction(R.string.action_stop))
+        val control = gui.openRun(run.runId, run.session.controller) { event(run, AgentEvent.GuiControlChanged(it)) }
+        try {
+            control.withAction { }
+            pump()
+            assertTrue(capsuleHasAction(R.string.overlay_pause))
+        } finally {
+            control.close()
+        }
     }
 
     @Test
@@ -383,11 +421,6 @@ class AgentRuntimeOverlayLifecycleTest {
         present(run)
         run.session.complete(AgentRuntimeWire.RunResult(run.runId, true, "完成"))
         registry.finish(run.runId, run.session)
-        // If a regression starts execution, validation rejects this local fixture before any network request.
-        run.completedContext = RuntimeRunRegistry.CompletedContext(
-            request = run.request.copy(config = run.request.config.copy(baseUrl = "")),
-            response = AgentModelClient.ModelResponse.Text("完成"),
-        )
         assertFalse(invoke("requestSupplement", String::class.java to run.runId, String::class.java to "迟到的旧回调") as Boolean)
         assertTrue(registry.all().isEmpty())
         assertNull(field("capsuleView"))
@@ -538,8 +571,7 @@ class AgentRuntimeOverlayLifecycleTest {
         val result = AgentRuntimeWire.RunResult(run.runId, ok, if (ok) "完成" else "", if (ok) null else "失败")
         run.session.complete(result)
         registry.finish(run.runId, run.session)
-        invoke("postTerminalOverlay", RuntimeRunRegistry.Run::class.java to run, AgentRuntimeWire.RunResult::class.java to result,
-            RuntimeRunRegistry.CompletedContext::class.java to null)
+        invoke("postTerminalOverlay", RuntimeRunRegistry.Run::class.java to run, AgentRuntimeWire.RunResult::class.java to result)
         ShadowLooper.idleMainLooper()
     }
 
@@ -547,6 +579,15 @@ class AgentRuntimeOverlayLifecycleTest {
     private fun expanded() = field("capsuleExpanded") as MutableState<Boolean>
     private fun dp(value: Int) = (value * service.resources.displayMetrics.density).toInt()
     private fun field(name: String): Any? = service.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(service)
+    private fun capsuleHasAction(label: Int): Boolean {
+        val view = field("capsuleView") as ComposeView
+        val ownerView = view.getChildAt(0)
+        val owner = ownerView.javaClass.getMethod("getSemanticsOwner").invoke(ownerView) as SemanticsOwner
+        fun containsAction(node: SemanticsNode): Boolean =
+            node.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(service.getString(label)) == true ||
+                node.children.any(::containsAction)
+        return containsAction(owner.unmergedRootSemanticsNode)
+    }
     private fun setField(name: String, value: Any?) = service.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(service, value)
     private fun invoke(name: String, vararg args: Pair<Class<*>, Any?>): Any? = service.javaClass
         .getDeclaredMethod(name, *args.map { it.first }.toTypedArray()).apply { isAccessible = true }

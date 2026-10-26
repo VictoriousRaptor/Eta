@@ -122,6 +122,7 @@ internal fun AgentOverlayCapsule(
     onFullscreenVirtualDisplay: () -> Unit = {},
     onTapVirtualCanvas: (Float, Float, Boolean) -> Unit = { _, _, _ -> },
     onSwipeVirtualCanvas: (Float, Float, Float, Float, Int) -> Unit = { _, _, _, _, _ -> },
+    canPause: Boolean = true,
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
@@ -398,7 +399,7 @@ internal fun AgentOverlayCapsule(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
                                         ) {
-                                            if (state.phase == AgentOverlayPhase.RUNNING) {
+                                            if (state.phase == AgentOverlayPhase.RUNNING && canPause) {
                                                 CapsuleAction(
                                                     icon = Icons.Rounded.Pause,
                                                     label = stringResource(R.string.overlay_pause),
@@ -457,7 +458,7 @@ internal fun AgentOverlayCapsule(
                                         onClick = { setSupplementMode(true) },
                                     )
                                 }
-                                if (state.phase == AgentOverlayPhase.RUNNING) {
+                                if (state.phase == AgentOverlayPhase.RUNNING && canPause) {
                                     CapsuleAction(
                                         icon = Icons.Rounded.Pause,
                                         label = stringResource(R.string.overlay_pause),
