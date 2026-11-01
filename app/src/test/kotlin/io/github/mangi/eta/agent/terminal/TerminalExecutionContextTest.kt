@@ -25,7 +25,7 @@ class TerminalExecutionContextTest {
         val workspace = File(temporary.root, "terminal-user/workspace").path
         val context = TerminalExecutionContext(
             linuxEnvironment = TerminalEnvironment.DEBIAN,
-            linuxRootfsPath = File(temporary.root, "terminal-user/proot/debian/rootfs").path,
+            linuxRootfsPath = File(temporary.root, "terminal-user/proot/debian/rootfs").invariantSeparatorsPath,
             userWorkspacePath = workspace,
         )
 
@@ -41,7 +41,7 @@ class TerminalExecutionContextTest {
         val workspace = File(temporary.root, "terminal-user/workspace").path
         val context = TerminalExecutionContext(
             linuxEnvironment = TerminalEnvironment.ALPINE,
-            linuxRootfsPath = File(temporary.root, "terminal/alpine/rootfs").path,
+            linuxRootfsPath = File(temporary.root, "terminal/alpine/rootfs").invariantSeparatorsPath,
             userWorkspacePath = workspace,
         )
 
@@ -55,7 +55,7 @@ class TerminalExecutionContextTest {
         val workspace = File(temporary.root, "terminal/workspace").path
         val context = TerminalExecutionContext(
             linuxEnvironment = TerminalEnvironment.DEBIAN,
-            linuxRootfsPath = File(temporary.root, "terminal/proot/debian/rootfs").path,
+            linuxRootfsPath = File(temporary.root, "terminal/proot/debian/rootfs").invariantSeparatorsPath,
             userWorkspacePath = workspace,
         )
 
@@ -68,7 +68,7 @@ class TerminalExecutionContextTest {
         val rootfs = File(temporary.root, "terminal-user/proot/debian/rootfs").apply { mkdirs() }
         File(rootfs, LinuxEnvironmentPaths.READY_MARKER).writeText("ready")
         val workspace = File(temporary.root, "work\n\"space").path
-        val context = TerminalExecutionContext(TerminalEnvironment.DEBIAN, rootfs.path, workspace)
+        val context = TerminalExecutionContext(TerminalEnvironment.DEBIAN, rootfs.invariantSeparatorsPath, workspace)
 
         val description = context.description(rootAvailable = false)
         assertTrue(context.linuxReady)
@@ -93,7 +93,7 @@ class TerminalExecutionContextTest {
     @Test fun descriptionIncludesConfiguredSharedFolderMappings() {
         val context = TerminalExecutionContext(
             linuxEnvironment = TerminalEnvironment.DEBIAN,
-            linuxRootfsPath = File(temporary.root, "terminal-user/proot/debian/rootfs").path,
+            linuxRootfsPath = File(temporary.root, "terminal-user/proot/debian/rootfs").invariantSeparatorsPath,
             userWorkspacePath = "/eta/workspace",
             sharedMounts = listOf(
                 SharedFolderMount(name = "Download", sourcePath = "/sdcard/Download"),

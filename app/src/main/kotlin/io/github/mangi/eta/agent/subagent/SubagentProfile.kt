@@ -70,6 +70,7 @@ internal data class SubagentProfile(
         val FORBIDDEN_TOOLS = setOf(
             AgentSubagentToolCatalog.TOOL_NAME,
             AgentSubagentToolCatalog.PROFILE_TOOL_NAME,
+            "request_user_input",
             "observe_screen",
             "release_gui",
             "present_to_user",

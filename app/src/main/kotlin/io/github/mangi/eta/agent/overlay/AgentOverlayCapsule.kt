@@ -207,9 +207,10 @@ internal fun AgentOverlayCapsule(
         finishedListener = { value -> if (value == 0f) onCollapsedSettled() },
     )
 
+    val showVirtualStage = virtualDisplay.active && state.pendingUserInput == null && !supplementMode
     val targetCapsuleWidth by animateDpAsState(
         targetValue = when {
-            virtualDisplay.active && expanded -> StageCapsuleWidth
+            showVirtualStage && expanded -> StageCapsuleWidth
             virtualDisplay.active -> MicroLensCapsuleWidth
             else -> DefaultCapsuleWidth
         },
@@ -217,7 +218,7 @@ internal fun AgentOverlayCapsule(
         label = "capsule_width",
     )
     val targetCapsuleCorner by animateDpAsState(
-        targetValue = if (virtualDisplay.active && expanded) StageOuterCorner else CapsuleCorner,
+        targetValue = if (showVirtualStage && expanded) StageOuterCorner else CapsuleCorner,
         animationSpec = spring(dampingRatio = 0.86f, stiffness = Spring.StiffnessMediumLow),
         label = "capsule_corner",
     )
@@ -348,7 +349,7 @@ internal fun AgentOverlayCapsule(
                             .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
                             .graphicsLayer { translationY = (1f - expansion) * -6.dp.toPx() },
                     ) {
-                        if (virtualDisplay.active && state.pendingUserInput == null && !supplementMode) {
+                        if (showVirtualStage) {
                             VirtualDisplayStageSection(
                                 snapshot = virtualDisplay,
                                 accent = accent,

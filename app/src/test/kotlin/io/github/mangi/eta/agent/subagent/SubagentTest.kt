@@ -45,6 +45,7 @@ class SubagentTest {
         SubagentProfile.BUILTIN_PROFILES.forEach { profile ->
             val allowed = profile.filterTools(fullCatalog).toolNames()
             assertFalse("subagent" in allowed)
+            assertFalse("request_user_input" in allowed)
             assertFalse("observe_screen" in allowed)
             assertFalse("tap_element" in allowed)
             assertFalse("type_text" in allowed)
@@ -70,6 +71,25 @@ class SubagentTest {
         assertTrue("write_file" in coderTools)
         assertTrue("edit_file" in coderTools)
         assertTrue("terminal" in coderTools)
+    }
+
+    @Test
+    fun wildcardSubagentCannotWaitForDirectUserInput() {
+        val profile = SubagentProfile.resolve(
+            name = "custom-researcher",
+            catalog = emptyList(),
+            customRole = "检查信息并将缺少的条件报告给父任务",
+            customTools = listOf("*"),
+        )
+        val catalog = AgentToolCatalog.build(
+            terminalTools = true,
+            browserTools = false,
+            clarifyEnabled = true,
+        )
+        assertTrue("request_user_input" in catalog.toolNames())
+        assertTrue(profile.isToolAllowed("read_file"))
+        assertFalse(profile.isToolAllowed("request_user_input"))
+        assertFalse("request_user_input" in profile.filterTools(catalog).toolNames())
     }
 
     @Test

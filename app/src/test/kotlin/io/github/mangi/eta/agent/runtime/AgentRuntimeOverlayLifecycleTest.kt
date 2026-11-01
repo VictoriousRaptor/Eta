@@ -29,6 +29,7 @@ import io.github.mangi.eta.agent.overlay.AgentOverlayInteractionDraft
 import io.github.mangi.eta.agent.overlay.AgentOverlayPhase
 import io.github.mangi.eta.agent.overlay.AgentOverlayState
 import io.github.mangi.eta.agent.overlay.AgentOverlayStatus
+import io.github.mangi.eta.agent.virtualdisplay.VirtualDisplaySnapshot
 import io.github.mangi.eta.config.Prefs
 import io.github.mangi.eta.ui.app.EtaUiVisibility
 import io.github.mangi.eta.ui.app.EtaUiVisibilityTracker
@@ -179,6 +180,45 @@ class AgentRuntimeOverlayLifecycleTest {
         assertEquals(dp(124), (field("capsuleParams") as WindowManager.LayoutParams).height)
         invoke("onCapsuleCollapsedSettled")
         assertEquals(dp(68), (field("capsuleParams") as WindowManager.LayoutParams).height)
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h891dp")
+    fun virtualDisplayStageRestoresAfterClarificationAndStaysHiddenInEta() = withRecomposerPolicy { pump ->
+        @Suppress("UNCHECKED_CAST")
+        val virtualDisplay = field("virtualDisplayState") as MutableState<VirtualDisplaySnapshot>
+        virtualDisplay.value = VirtualDisplaySnapshot(active = true, displayId = 2)
+        val run = run("virtual-clarify")
+        run.overlayRequested = true
+        present(run)
+        invoke("showOverlay")
+        invoke("toggleCapsule")
+        pump()
+        val params = field("capsuleParams") as WindowManager.LayoutParams
+        assertEquals(dp(324), params.width)
+        assertEquals(dp(524), params.height)
+
+        val request = waiting("virtual-question").pendingUserInput!!
+        event(run, AgentEvent.UserInputRequested(request))
+        pump()
+        assertTrue(params.height > dp(124))
+        assertTrue(params.height <= dp(480))
+        assertEquals(0, params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+        event(run, AgentEvent.UserInputAnswered(AgentUserInputAnswer(request.id, mapOf("q" to "答案"))))
+        pump()
+        assertEquals(dp(324), params.width)
+        assertEquals(dp(524), params.height)
+        assertTrue(params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+
+        val activity = TestActivity()
+        tracker.onActivityStarted(activity)
+        AgentRuntimeService.onEtaUiVisibilityChanged()
+        pump()
+        assertNull(field("capsuleView"))
+        tracker.onActivityStopped(activity)
+        pump()
+        assertEquals(dp(524), (field("capsuleParams") as WindowManager.LayoutParams).height)
+        assertTrue(registry.contains(run))
     }
 
     @Test

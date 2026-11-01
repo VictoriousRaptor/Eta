@@ -168,9 +168,11 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                 val wasActive = virtualDisplayState.value.active
                 virtualDisplayState.value = snapshot
                 if (wasActive != snapshot.active) {
-                    if (!snapshot.active) VirtualDisplayController.setStageExpanded(false)
                     updateCapsuleWindowBounds()
-                    displayedRun?.let(::syncActiveRunOverlayVisibility)
+                    handleAppVisibilityChanged(EtaUiVisibility.isVisible)
+                    VirtualDisplayController.setStageExpanded(
+                        snapshot.active && capsuleView != null && capsuleExpanded.value && !capsuleSupplementFocusable.value,
+                    )
                 }
             }
         }
@@ -919,42 +921,6 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         showOverlay()
     }
 
-    private fun syncActiveRunOverlayVisibility(run: RuntimeRunRegistry.Run?) {
-        if (AgentOverlayVisibilityPolicy.shouldSuppressOverlayInEtaUi(
-                handoffSource = run?.request?.handoff?.source,
-                etaUiInForeground = MainActivity.isInForeground,
-                virtualDisplayActive = virtualDisplayState.value.active,
-            )
-        ) {
-            removeAmbientWindows()
-        } else {
-            ensureOverlayVisible()
-        }
-    }
-
-    private fun handleEtaUiVisibilityChanged() {
-        if (destroyed) return
-        val run = displayedRun ?: return
-        val suppress = AgentOverlayVisibilityPolicy.shouldSuppressOverlayInEtaUi(
-            handoffSource = run.request.handoff?.source,
-            etaUiInForeground = MainActivity.isInForeground,
-            virtualDisplayActive = virtualDisplayState.value.active,
-        )
-        if (resultCardView != null) {
-            if (suppress) dismissResult(run)
-            return
-        }
-        val guiState = guiControl.state.value
-        val activeGuiRun = guiState.userPaused || (guiState.ownerRunId == run.runId && !run.session.isTerminal)
-        if (!activeGuiRun) return
-        if (suppress) {
-            removeAmbientWindows()
-        } else {
-            state.value = run.overlayState
-            ensureOverlayVisible()
-        }
-    }
-
     private fun updateKeepScreenOn() {
         val guiState = guiControl.state.value
         val session = guiState.ownerRunId?.let(runs::get)?.session
@@ -1124,12 +1090,16 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
                     },
                     virtualDisplay = virtualDisplayState.value,
                     onTakeOverVirtualDisplay = {
-                        if (displayedRun === run) VirtualDisplayController.setUserControlling(true)
-                        if (displayedRun === run) requestPause(run?.runId)
+                        if (displayedRun === run) {
+                            VirtualDisplayController.setUserControlling(true)
+                            requestPause(run?.runId)
+                        }
                     },
                     onResumeVirtualDisplay = {
-                        if (displayedRun === run) VirtualDisplayController.setUserControlling(false)
-                        if (displayedRun === run) requestResume()
+                        if (displayedRun === run) {
+                            VirtualDisplayController.setUserControlling(false)
+                            requestResume()
+                        }
                     },
                     onFullscreenVirtualDisplay = { if (displayedRun === run) requestFullscreenVirtualDisplay() },
                     onTapVirtualCanvas = { nx, ny, longPress ->
@@ -1383,7 +1353,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
      * 胶囊窗口使用固定宽度与分档高度，动画只在窗口内进行。
      * WRAP_CONTENT 会让每一帧的尺寸变化都触发 WindowManager 重新布局整个窗口，这是卡顿的来源；
      * 但窗口内透明区域同样会吞掉触摸（包括 Agent 自己注入的点击），所以高度只在需要时扩大：
-     * 展开前先扩到目标档，收起动画结束后再缩回，见 [setCapsuleWindowHeight]。
+     * 展开前先扩到目标档，收起动画结束后再缩回，见 [updateCapsuleWindowBounds]。
      */
     private fun capsuleLayoutParams(): WindowManager.LayoutParams =
         WindowManager.LayoutParams(
@@ -1513,6 +1483,9 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         val effectiveFocusable = focusable || clarify
         capsuleSupplementFocusable.value = effectiveFocusable
         updateCapsuleWindowBounds()
+        VirtualDisplayController.setStageExpanded(
+            capsuleExpanded.value && !effectiveFocusable && virtualDisplayState.value.active,
+        )
         val wm = windowManager ?: return
         val capsule = capsuleView ?: return
         val lp = capsuleParams ?: return
@@ -1594,6 +1567,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun removeAmbientWindows() {
+        VirtualDisplayController.setStageExpanded(false)
         mainHandler.removeCallbacks(restoreCapsule)
         capsuleYielded.value = false
         capsuleView?.keepScreenOn = false
@@ -1616,6 +1590,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
     }
 
     private fun removeOverlayWindows() {
+        VirtualDisplayController.setStageExpanded(false)
         mainHandler.removeCallbacksAndMessages(hideToken)
         mainHandler.removeCallbacks(restoreCapsule)
         capsuleYielded.value = false
@@ -1662,7 +1637,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
 
         internal fun onEtaUiVisibilityChanged() {
             val instance = activeInstance ?: return
-            instance.mainHandler.post { instance.handleEtaUiVisibilityChanged() }
+            instance.mainHandler.post { instance.handleAppVisibilityChanged(EtaUiVisibility.isVisible) }
         }
 
         private const val ACTION_KEEP_ALIVE = "io.github.mangi.eta.agent.runtime.KEEP_ALIVE"
