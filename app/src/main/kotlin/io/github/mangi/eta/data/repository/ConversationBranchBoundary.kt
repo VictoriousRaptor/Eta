@@ -11,6 +11,11 @@ internal object ConversationBranchBoundary {
     fun eligibleMessageIds(messages: List<ConversationBranchMessage>, running: Boolean = false): Set<String> = buildSet {
         var candidate: String? = null
         for (message in messages) {
+            // 澄清问题和回答是当前工具交互，不形成可分支的回复或新的用户轮次。
+            if (message.id.startsWith("clarification-")) {
+                candidate = null
+                continue
+            }
             when (message.type) {
                 "user" -> {
                     // 运行中的补充输入仍属于原轮次，不能将补充前的过渡正文当成最终结果。
@@ -80,7 +85,8 @@ internal object ConversationBranchBoundary {
 
     fun remapId(branchId: String, messageId: String): String {
         if (messageId.isBlank()) return messageId
-        val prefix = listOf("assistant-", "user-", "greeting-").firstOrNull(messageId::startsWith).orEmpty()
+        val prefix = listOf("assistant-", "user-", "greeting-", "clarification-answer-", "clarification-")
+            .firstOrNull(messageId::startsWith).orEmpty()
         return "$prefix$branchId-${messageId.removePrefix(prefix)}"
     }
 }

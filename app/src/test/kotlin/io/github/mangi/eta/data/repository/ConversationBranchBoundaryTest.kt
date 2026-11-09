@@ -36,6 +36,38 @@ class ConversationBranchBoundaryTest {
     }
 
     @Test
+    fun clarificationDoesNotMakeQuestionsOrIntermediateRepliesBranchable() {
+        val rows = outline(
+            "user" to "u1", "assistant" to "a1", "user" to "u2",
+            "assistant" to "intermediate", "assistant" to "clarification-run-request",
+            "user" to "clarification-answer-run-request", "assistant" to "final",
+        )
+        assertEquals(setOf("a1"), ConversationBranchBoundary.eligibleMessageIds(rows.dropLast(1)))
+        assertEquals(setOf("a1"), ConversationBranchBoundary.eligibleMessageIds(rows, running = true))
+        assertEquals(setOf("a1", "final"), ConversationBranchBoundary.eligibleMessageIds(rows))
+        val journal = listOf(user("u1"), assistant("a1"), user("u2"), call().copy(
+            toolCallsJson = """[{"id":"tool-1","type":"function","function":{"name":"request_user_input","arguments":"{}"}}]""",
+        ), result(), assistant("final"))
+        assertEquals(journal, ConversationBranchBoundary.resolve(rows, journal, emptyRole, "final"))
+        assertThrows(ConversationBranchUnavailable::class.java) {
+            ConversationBranchBoundary.resolve(rows, journal, emptyRole, "clarification-run-request")
+        }
+    }
+
+    @Test
+    fun clarificationSemanticsSurviveBranchingMoreThanOnce() {
+        val rows = outline(
+            "user" to "user-run", "assistant" to "intermediate",
+            "assistant" to "clarification-run-request", "user" to "clarification-answer-run-request",
+            "assistant" to "assistant-final",
+        ).map { row -> row.copy(id = ConversationBranchBoundary.remapId("child", row.id)) }
+            .map { row -> row.copy(id = ConversationBranchBoundary.remapId("grandchild", row.id)) }
+        assertEquals(setOf("assistant-grandchild-child-final"), ConversationBranchBoundary.eligibleMessageIds(rows))
+        assertEquals(emptySet<String>(), ConversationBranchBoundary.eligibleMessageIds(rows.dropLast(1)))
+        assertEquals("clarification-answer-grandchild-child-run-request", rows[3].id)
+    }
+
+    @Test
     fun stableIdsIncludeAllBlocksAndToolsButExcludeLaterTurns() {
         val rows = outline("user" to "u1", "tool" to "tool", "assistant" to "assistant-r-2-0",
             "assistant" to "assistant-r-2-1", "user" to "u2", "assistant" to "a2")

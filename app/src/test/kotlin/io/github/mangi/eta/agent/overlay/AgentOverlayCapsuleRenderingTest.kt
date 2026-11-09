@@ -21,11 +21,15 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Density
+import com.itos.coui.effect.LocalCouiContourGlowEnabled
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.runtime.AgentUserInputAnswer
 import io.github.mangi.eta.agent.runtime.AgentUserInputQuestion
 import io.github.mangi.eta.agent.runtime.AgentUserInputRequest
 import io.github.mangi.eta.config.Prefs
+import io.github.mangi.eta.data.model.AppearanceSettings
+import io.github.mangi.eta.data.model.AppearanceUiStyle
+import io.github.mangi.eta.ui.app.AgentAppTheme
 import io.github.mangi.eta.ui.components.AgentClarificationPagerState
 import java.io.File
 import java.io.FileOutputStream
@@ -56,7 +60,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.android.asCoroutineDispatcher
 import org.robolectric.shadows.ShadowLooper
 import top.yukonga.miuix.kmp.squircle.LocalSquircleEnabled
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -898,9 +901,30 @@ class AgentOverlayCapsuleRenderingTest {
         }
     }
 
+    @Test
+    fun supplementInputRendersAndSendsAcrossBothUiStyles() {
+        for (style in AppearanceUiStyle.entries) {
+            var sends = 0
+            withContent(
+                content = {
+                    OverlaySupplementInput(
+                        value = "补充建议", onValueChange = {}, onCancel = {}, onSend = { sends++ },
+                    )
+                },
+                uiStyle = style,
+            ) { view, activity, _ ->
+                val send = findNodeByText(view, activity.getString(R.string.overlay_send))
+                assertNotNull("发送按钮应在 $style 下可用", send)
+                clickNode(send!!)
+                assertEquals(1, sends)
+            }
+        }
+    }
+
     private fun withContent(
         content: @Composable () -> Unit,
         windowHeight: Int = 480,
+        uiStyle: AppearanceUiStyle = AppearanceUiStyle.COUI,
         verify: (ComposeView, ComponentActivity, () -> Unit) -> Unit,
     ) {
         val testDispatcher = Handler(Looper.getMainLooper()).asCoroutineDispatcher("capsule-test").immediate
@@ -935,11 +959,15 @@ class AgentOverlayCapsuleRenderingTest {
             try {
                 activity.setContentView(view)
                 view.setContent {
-                    CompositionLocalProvider(
-                        LocalDensity provides Density(1f),
-                        LocalSquircleEnabled provides false,
+                    AgentAppTheme(
+                        appearance = AppearanceSettings(uiStyle = uiStyle),
+                        applyInterfaceScale = false,
                     ) {
-                        MiuixTheme {
+                        CompositionLocalProvider(
+                            LocalDensity provides Density(1f),
+                            LocalSquircleEnabled provides false,
+                            LocalCouiContourGlowEnabled provides false,
+                        ) {
                             content()
                         }
                     }

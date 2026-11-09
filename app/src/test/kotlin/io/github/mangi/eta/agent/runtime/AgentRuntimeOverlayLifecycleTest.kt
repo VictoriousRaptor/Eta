@@ -2,6 +2,8 @@ package io.github.mangi.eta.agent.runtime
 
 import android.app.Activity
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -31,6 +33,7 @@ import io.github.mangi.eta.agent.overlay.AgentOverlayState
 import io.github.mangi.eta.agent.overlay.AgentOverlayStatus
 import io.github.mangi.eta.agent.virtualdisplay.VirtualDisplaySnapshot
 import io.github.mangi.eta.config.Prefs
+import io.github.mangi.eta.data.datastore.SettingsDataStore
 import io.github.mangi.eta.ui.app.EtaUiVisibility
 import io.github.mangi.eta.ui.app.EtaUiVisibilityTracker
 import io.github.mangi.eta.ui.components.AgentClarificationPagerState
@@ -45,12 +48,16 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ServiceController
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowLooper
+import org.robolectric.shadows.ShadowChoreographer
 import org.robolectric.shadows.ShadowSettings
+import java.time.Duration
 
 @OptIn(ExperimentalComposeUiApi::class, InternalComposeUiApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -65,6 +72,7 @@ class AgentRuntimeOverlayLifecycleTest {
 
     @Before
     fun setUp() {
+        SettingsDataStore.init(RuntimeEnvironment.getApplication())
         ShadowSettings.setCanDrawOverlays(true)
         tracker = EtaUiVisibilityTracker(stopDebounceMs = 0L, isTrackedActivity = { it is TestActivity })
         EtaUiVisibility.setTrackerForTest(tracker)
@@ -222,6 +230,7 @@ class AgentRuntimeOverlayLifecycleTest {
     }
 
     @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun clarificationOnlyOffersPauseWhenItsRunOwnsGuiControl() = withRecomposerPolicy { pump ->
         val run = run("clarify-pause")
         event(run, AgentEvent.UserInputRequested(waiting("request").pendingUserInput!!))
@@ -621,6 +630,12 @@ class AgentRuntimeOverlayLifecycleTest {
     private fun field(name: String): Any? = service.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(service)
     private fun capsuleHasAction(label: Int): Boolean {
         val view = field("capsuleView") as ComposeView
+        val bitmap = Bitmap.createBitmap(view.width.coerceAtLeast(1), view.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        try {
+            view.draw(Canvas(bitmap))
+        } finally {
+            bitmap.recycle()
+        }
         val ownerView = view.getChildAt(0)
         val owner = ownerView.javaClass.getMethod("getSemanticsOwner").invoke(ownerView) as SemanticsOwner
         fun containsAction(node: SemanticsNode): Boolean =
@@ -649,8 +664,12 @@ class AgentRuntimeOverlayLifecycleTest {
         val dispatcher = Handler(Looper.getMainLooper()).asCoroutineDispatcher("overlay-test").immediate
         val clock = BroadcastFrameClock()
         var nanos = 0L
+        val originalFrameDelay = ShadowChoreographer.getFrameDelay()
+        val originalPaused = ShadowChoreographer.isPaused()
+        ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
+        ShadowChoreographer.setPaused(false)
         val pump = {
-            repeat(10) {
+            repeat(80) {
                 Snapshot.sendApplyNotifications()
                 ShadowLooper.idleMainLooper(16, TimeUnit.MILLISECONDS)
                 Snapshot.sendApplyNotifications()
@@ -658,6 +677,18 @@ class AgentRuntimeOverlayLifecycleTest {
                 nanos += 16_000_000L
                 clock.sendFrame(nanos)
                 ShadowLooper.idleMainLooper()
+                // 共享主题的移动内容在布局时展开，系统浮层的测试宿主需主动完成布局。
+                val view = field("capsuleView") as? ComposeView
+                val params = field("capsuleParams") as? WindowManager.LayoutParams
+                if (view != null && params != null) {
+                    val width = params.width.takeIf { it > 0 } ?: service.resources.displayMetrics.widthPixels
+                    val height = params.height.takeIf { it > 0 } ?: service.resources.displayMetrics.heightPixels
+                    view.measure(
+                        View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(height, if (params.height > 0) View.MeasureSpec.EXACTLY else View.MeasureSpec.AT_MOST),
+                    )
+                    view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+                }
             }
             Snapshot.sendApplyNotifications()
             ShadowLooper.idleMainLooper()
@@ -668,6 +699,8 @@ class AgentRuntimeOverlayLifecycleTest {
             }) { block(pump) }
         } finally {
             invoke("removeOverlayWindowsForForeground")
+            ShadowChoreographer.setFrameDelay(originalFrameDelay)
+            ShadowChoreographer.setPaused(originalPaused)
         }
     }
 }
