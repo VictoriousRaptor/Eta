@@ -30,7 +30,6 @@ import io.github.mangi.eta.R
 import io.github.mangi.eta.data.datastore.SettingsDataStore
 import io.github.mangi.eta.data.model.ReasoningEffort
 import io.github.mangi.eta.ui.model.AgentContextUsageUi
-import io.github.mangi.eta.ui.model.AgentModelPickerUiState
 import io.github.mangi.eta.ui.model.SteerAcknowledgement
 import io.github.mangi.eta.ui.model.QueuedMessageUi
 import io.github.mangi.eta.ui.model.PendingImageUi
@@ -281,7 +280,7 @@ class AgentChatInputBarSteerTest {
                             key(compositionKey.value) {
                                 AgentChatInputBar(
                                     input = input.value, inputSyncVersion = inputVersion.value,
-                                    modelPickerState = AgentModelPickerUiState(), isCompacting = false,
+                                    isCompacting = false,
                                     contextUsage = AgentContextUsageUi(null, null), showContextUsage = false,
                                     isStreaming = streaming.value, steerEnabled = steerEnabled.value,
                                     interactionSubmitting = submitting.value, queuedMessages = queuedMessages.value,
@@ -294,7 +293,7 @@ class AgentChatInputBarSteerTest {
                                     pendingImages = emptyList(), pendingFileReferences = emptyList(),
                                     isEditingMessage = editing.value, editHasLaterTurns = false, preserveFollowingMessages = false,
                                     onReasoningEffortChange = {}, onCompactContext = {}, canCompactContext = false,
-                                    onModelSelected = {}, onSubmit = { submissions += it }, onSteer = { supplements += it },
+                                    onSubmit = { submissions += it }, onSteer = { supplements += it },
                                     onSteerQueuedMessage = { queuedSteers += it }, onRecallQueuedMessage = { id, draft -> recalls += id to draft },
                                     onStop = {}, onAttachImage = {}, onRemoveImage = {},
                                     onAttachFiles = {}, onAttachFolder = {}, onAttachFilePath = {}, onRemoveFileReference = {},
