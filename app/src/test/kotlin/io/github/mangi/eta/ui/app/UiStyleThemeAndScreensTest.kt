@@ -1,6 +1,7 @@
 package io.github.mangi.eta.ui.app
 
 import android.os.Looper
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.view.View
 import android.view.ViewGroup
@@ -8,13 +9,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.BroadcastFrameClock
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Recomposer
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.LocalDensity
@@ -72,6 +76,9 @@ import io.github.mangi.eta.ui.voice.SpeechSynthesisScreen
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -81,6 +88,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
+import org.robolectric.shadows.ShadowLooper
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = EtaApp::class, sdk = [36])
@@ -91,7 +99,10 @@ class UiStyleThemeAndScreensTest {
     fun switchingUiStylePreservesStateAndSynchronizesPageAndDialogScaleWith100PercentBaseline() {
         val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup().visible()
         val activity = controller.get()
-        val looper = shadowOf(Looper.getMainLooper())
+        // 与侧栏回归相同，独立驱动帧，避免混合 SDK 沙箱留下的窗口帧时钟阻塞重组。
+        val frameClock = BroadcastFrameClock()
+        val recomposeScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + frameClock)
+        val recomposer = Recomposer(recomposeScope.coroutineContext)
         val baseDensity = activity.resources.configuration.densityDpi.toFloat() / DisplayMetrics.DENSITY_DEFAULT
 
         var appearance by mutableStateOf(
@@ -107,7 +118,8 @@ class UiStyleThemeAndScreensTest {
         var latestDraft = ""
 
         try {
-            activity.setContent {
+            recomposeScope.launch { recomposer.runRecomposeAndApplyChanges() }
+            activity.setContent(parent = recomposer) {
                 AgentAppTheme(
                     appearance = appearance,
                     applyInterfaceScale = true,
@@ -128,9 +140,7 @@ class UiStyleThemeAndScreensTest {
                     }
                 }
             }
-            looper.idle()
-            measureAndLayoutActivity(activity)
-            looper.idle()
+            pumpThemeFrames(activity, frameClock)
 
             assertEquals(AppearanceUiStyle.COUI, observedStyle)
             assertEquals(1, mountCount)
@@ -143,9 +153,7 @@ class UiStyleThemeAndScreensTest {
                 uiStyle = AppearanceUiStyle.MIUIX,
                 interfaceScale = 0.9f,
             )
-            looper.idle()
-            measureAndLayoutActivity(activity)
-            looper.idle()
+            pumpThemeFrames(activity, frameClock)
 
             assertEquals(AppearanceUiStyle.MIUIX, observedStyle)
             assertEquals(1, mountCount)
@@ -155,14 +163,15 @@ class UiStyleThemeAndScreensTest {
 
             // 再切回 COUI：状态依然保持不变
             appearance = appearance.copy(uiStyle = AppearanceUiStyle.COUI)
-            looper.idle()
-            measureAndLayoutActivity(activity)
-            looper.idle()
+            pumpThemeFrames(activity, frameClock)
 
             assertEquals(AppearanceUiStyle.COUI, observedStyle)
             assertEquals(1, mountCount)
             assertEquals("edited-draft-1", latestDraft)
         } finally {
+            recomposer.cancel()
+            recomposeScope.cancel()
+            ShadowLooper.idleMainLooper(100, TimeUnit.MILLISECONDS)
             controller.pause().stop().destroy()
         }
     }
@@ -312,6 +321,18 @@ class UiStyleThemeAndScreensTest {
             assertEquals(1, backPressedCount)
         } finally {
             controller.pause().stop().destroy()
+        }
+    }
+
+    private fun pumpThemeFrames(activity: ComponentActivity, frameClock: BroadcastFrameClock) {
+        val looper = shadowOf(Looper.getMainLooper())
+        repeat(4) {
+            Snapshot.sendApplyNotifications()
+            looper.idle()
+            ShadowLooper.idleMainLooper(16, TimeUnit.MILLISECONDS)
+            frameClock.sendFrame(SystemClock.uptimeMillis() * 1_000_000L)
+            measureAndLayoutActivity(activity)
+            looper.idle()
         }
     }
 
