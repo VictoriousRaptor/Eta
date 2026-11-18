@@ -22,12 +22,14 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.Density
 import com.itos.coui.effect.LocalCouiContourGlowEnabled
 import com.itos.coui.menu.ProvideCouiMenuBackdrop
 import com.itos.coui.theme.CouiPresets
 import com.itos.coui.theme.CouiTheme
 import com.itos.coui.theme.LocalCouiDarkTheme
+import io.github.mangi.eta.ui.links.AppUriHandler
 import io.github.mangi.eta.data.model.AppearanceAccentColor
 import io.github.mangi.eta.data.model.AppearancePaletteStyle
 import io.github.mangi.eta.data.model.AppearanceSettings
@@ -61,6 +63,7 @@ fun AgentAppTheme(
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val uriHandler = remember(context) { AppUriHandler(context) }
     val configuration = LocalConfiguration.current
     val systemDark = isSystemInDarkTheme()
     val isDark = when (appearance.themeMode) {
@@ -196,6 +199,7 @@ fun AgentAppTheme(
 
         MiuixTheme(colors = themedMiuixColors) {
             CompositionLocalProvider(
+                LocalUriHandler provides uriHandler,
                 LocalContentColor provides themedMiuixColors.onBackground,
                 LocalCouiDarkTheme provides isDark,
                 LocalCouiContourGlowEnabled provides blurSupported,

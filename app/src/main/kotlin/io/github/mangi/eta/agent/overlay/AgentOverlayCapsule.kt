@@ -42,12 +42,19 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import io.github.mangi.eta.agent.runtime.AgentUserInputAnswer
+import io.github.mangi.eta.ui.components.AgentClarificationCard
+import io.github.mangi.eta.ui.components.rememberSteeringEnabled
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -97,48 +104,85 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun AgentOverlayCapsule(
     state: AgentOverlayState,
     expanded: Boolean,
-    yielded: Boolean,
+    yielded: Boolean = false,
     onToggleExpanded: () -> Unit,
     onCollapsedSettled: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
     onSupplementModeChange: (Boolean) -> Unit,
-    onSupplement: (String) -> Unit,
+    onSupplement: (String) -> Boolean,
+    onAnswerUserInput: (AgentUserInputAnswer) -> Boolean,
+    interactionDraft: AgentOverlayInteractionDraft? = null,
+    onDraftChange: ((AgentOverlayInteractionDraft) -> Unit)? = null,
     virtualDisplay: VirtualDisplaySnapshot = VirtualDisplaySnapshot.Inactive,
     onTakeOverVirtualDisplay: () -> Unit = {},
     onResumeVirtualDisplay: () -> Unit = {},
     onFullscreenVirtualDisplay: () -> Unit = {},
     onTapVirtualCanvas: (Float, Float, Boolean) -> Unit = { _, _, _ -> },
     onSwipeVirtualCanvas: (Float, Float, Float, Float, Int) -> Unit = { _, _, _, _, _ -> },
+    canPause: Boolean = true,
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
-    var supplementMode by remember { mutableStateOf(false) }
-    var supplementText by remember { mutableStateOf("") }
+    var localSupplementMode by remember { mutableStateOf(false) }
+    var localSupplementText by remember { mutableStateOf("") }
+
+    val currentDraft by rememberUpdatedState(interactionDraft)
+    val currentOnDraftChange by rememberUpdatedState(onDraftChange)
+
+    val isControlled = interactionDraft != null && onDraftChange != null
+    val supplementMode = if (isControlled) interactionDraft.supplementMode else localSupplementMode
+    val supplementText = if (isControlled) interactionDraft.supplementText else localSupplementText
+    var supplementAcceptedExit by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val steerEnabled = rememberSteeringEnabled()
 
-    fun setSupplementMode(enabled: Boolean) {
+    fun setSupplementMode(enabled: Boolean, clearText: Boolean = true) {
         onSupplementModeChange(enabled)
-        supplementMode = enabled
-        if (!enabled) supplementText = ""
+        supplementAcceptedExit = false
+        val draft = currentDraft
+        val onDraft = currentOnDraftChange
+        if (draft != null && onDraft != null) {
+            val nextText = if (!enabled && clearText) "" else draft.supplementText
+            onDraft.invoke(draft.copy(supplementMode = enabled, supplementText = nextText))
+        } else {
+            localSupplementMode = enabled
+            if (!enabled && clearText) localSupplementText = ""
+        }
+    }
+
+    fun updateSupplementText(text: String) {
+        val draft = currentDraft
+        val onDraft = currentOnDraftChange
+        if (draft != null && onDraft != null) {
+            onDraft.invoke(draft.copy(supplementText = text))
+        } else {
+            localSupplementText = text
+        }
     }
 
     // 收起键盘后再切换窗口焦点，避免输入法在窗口失焦瞬间闪退或残留。
-    fun leaveSupplementMode(then: () -> Unit = {}) {
+    fun leaveSupplementMode(clearText: Boolean = true, then: () -> Unit = {}) {
         focusManager.clearFocus(force = true)
         keyboard?.hide()
         scope.launch {
             delay(80)
-            setSupplementMode(false)
+            setSupplementMode(false, clearText)
             then()
         }
     }
 
     LaunchedEffect(expanded) {
         if (!expanded && supplementMode) leaveSupplementMode()
+    }
+
+    LaunchedEffect(state.pendingUserInput) {
+        if (state.pendingUserInput != null && supplementMode) {
+            leaveSupplementMode(clearText = false)
+        }
     }
 
     // 为 Agent 手势让路：使用平滑减速曲线，不用弹簧回弹。
@@ -162,9 +206,10 @@ internal fun AgentOverlayCapsule(
         finishedListener = { value -> if (value == 0f) onCollapsedSettled() },
     )
 
+    val showVirtualStage = virtualDisplay.active && state.pendingUserInput == null && !supplementMode
     val targetCapsuleWidth by animateDpAsState(
         targetValue = when {
-            virtualDisplay.active && expanded -> StageCapsuleWidth
+            showVirtualStage && expanded -> StageCapsuleWidth
             virtualDisplay.active -> MicroLensCapsuleWidth
             else -> DefaultCapsuleWidth
         },
@@ -172,7 +217,7 @@ internal fun AgentOverlayCapsule(
         label = "capsule_width",
     )
     val targetCapsuleCorner by animateDpAsState(
-        targetValue = if (virtualDisplay.active && expanded) StageOuterCorner else CapsuleCorner,
+        targetValue = if (showVirtualStage && expanded) StageOuterCorner else CapsuleCorner,
         animationSpec = tween(durationMillis = 260, easing = SmoothOutEasing),
         label = "capsule_corner",
     )
@@ -268,7 +313,9 @@ internal fun AgentOverlayCapsule(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        ThoughtLine(thought = state.thought.takeIf { state.phase == AgentOverlayPhase.RUNNING }.orEmpty())
+                        if (state.pendingUserInput == null) {
+                            ThoughtLine(thought = state.thought.takeIf { state.phase == AgentOverlayPhase.RUNNING }.orEmpty())
+                        }
                     }
                     AnimatedVisibility(
                         visible = virtualDisplay.active && !expanded,
@@ -297,7 +344,7 @@ internal fun AgentOverlayCapsule(
                             .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
                             .graphicsLayer { translationY = (1f - expansion) * -6.dp.toPx() },
                     ) {
-                        if (virtualDisplay.active && !supplementMode) {
+                        if (showVirtualStage) {
                             VirtualDisplayStageSection(
                                 snapshot = virtualDisplay,
                                 accent = accent,
@@ -310,14 +357,88 @@ internal fun AgentOverlayCapsule(
                             )
                             Spacer(Modifier.height(10.dp))
                         }
-                        if (supplementMode) {
+                        if (state.pendingUserInput != null) {
+                            val request = state.pendingUserInput
+                            key(request.id) {
+                                var submitting by remember { mutableStateOf(false) }
+                                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                                    val cardMaxHeight = (maxHeight - 46.dp).coerceAtLeast(0.dp)
+                                    Column {
+                                        AgentClarificationCard(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = cardMaxHeight),
+                                            request = request,
+                                            submitting = submitting,
+                                            compact = true,
+                                            controlledState = interactionDraft?.clarificationState?.takeIf { it.request.id == request.id },
+                                            onStateChange = onDraftChange?.let { draftChange ->
+                                                { nextPagerState ->
+                                                    if (request.id == nextPagerState.request.id) {
+                                                        currentDraft?.copy(clarificationState = nextPagerState)?.let { draftChange(it) }
+                                                    }
+                                                }
+                                            },
+                                            onSubmit = {
+                                                submitting = true
+                                                val success = onAnswerUserInput(it)
+                                                if (!success) {
+                                                    submitting = false
+                                                } else {
+                                                    focusManager.clearFocus(force = true)
+                                                    keyboard?.hide()
+                                                }
+                                            },
+                                        )
+                                        Spacer(Modifier.height(12.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                                        ) {
+                                            if (state.phase == AgentOverlayPhase.RUNNING && canPause) {
+                                                CapsuleAction(
+                                                    icon = Icons.Rounded.Pause,
+                                                    label = stringResource(R.string.overlay_pause),
+                                                    tint = MiuixTheme.colorScheme.onSurface,
+                                                    onClick = onPause,
+                                                )
+                                            } else if (state.phase == AgentOverlayPhase.PAUSED) {
+                                                CapsuleAction(
+                                                    icon = Icons.Rounded.PlayArrow,
+                                                    label = stringResource(R.string.overlay_resume),
+                                                    tint = MiuixTheme.colorScheme.primary,
+                                                    onClick = onResume,
+                                                )
+                                            }
+                                            CapsuleAction(
+                                                icon = Icons.Rounded.Stop,
+                                                label = stringResource(R.string.action_stop),
+                                                tint = MiuixTheme.colorScheme.error,
+                                                onClick = onStop,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (supplementMode) {
                             OverlaySupplementInput(
                                 value = supplementText,
-                                onValueChange = { supplementText = it },
+                                onValueChange = { updateSupplementText(it) },
                                 onCancel = { leaveSupplementMode() },
                                 onSend = {
-                                    val text = supplementText.trim()
-                                    if (text.isNotBlank()) leaveSupplementMode { onSupplement(text) }
+                                    if (!supplementAcceptedExit) {
+                                        val text = supplementText.trim()
+                                        if (text.isNotBlank() && steerEnabled) {
+                                            // Only leave mode if the text was accepted by the callback.
+                                            if (onSupplement(text)) {
+                                                supplementAcceptedExit = true
+                                                if (supplementText.trim() == text) {
+                                                    updateSupplementText("")
+                                                }
+                                                leaveSupplementMode(clearText = false)
+                                            }
+                                        }
+                                    }
                                 },
                             )
                         } else {
@@ -325,13 +446,15 @@ internal fun AgentOverlayCapsule(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
                             ) {
-                                CapsuleAction(
-                                    icon = Icons.Rounded.Edit,
-                                    label = stringResource(R.string.overlay_supplement),
-                                    tint = MiuixTheme.colorScheme.onSurface,
-                                    onClick = { setSupplementMode(true) },
-                                )
-                                if (state.phase == AgentOverlayPhase.RUNNING) {
+                                if (steerEnabled) {
+                                    CapsuleAction(
+                                        icon = Icons.Rounded.Edit,
+                                        label = stringResource(R.string.overlay_supplement),
+                                        tint = MiuixTheme.colorScheme.onSurface,
+                                        onClick = { setSupplementMode(true) },
+                                    )
+                                }
+                                if (state.phase == AgentOverlayPhase.RUNNING && canPause) {
                                     CapsuleAction(
                                         icon = Icons.Rounded.Pause,
                                         label = stringResource(R.string.overlay_pause),

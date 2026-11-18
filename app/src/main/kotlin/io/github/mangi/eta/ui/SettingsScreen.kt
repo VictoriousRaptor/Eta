@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.automirrored.rounded.Help
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.AccessibilityNew
 import androidx.compose.material.icons.rounded.AccountTree
@@ -103,6 +105,7 @@ import io.github.mangi.eta.ui.components.coui.CouiSettingsIcon
 import io.github.mangi.eta.ui.components.coui.CouiSwitchPreference
 import io.github.mangi.eta.ui.components.currentGlassOverlayBackdrop
 import io.github.mangi.eta.ui.model.AgentModelPickerProjector
+import io.github.mangi.eta.ui.links.AppLinkOpener
 import io.github.mangi.eta.ui.navigation.AppRoute
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -208,7 +211,7 @@ private fun SettingsPageContent(
     val appVersionName = BuildConfig.VERSION_NAME
     val appVersionSummary = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
     val openUrl: (String) -> Unit = { url ->
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        AppLinkOpener.open(context, url)
     }
     var checkingUpdate by remember { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<AppLatestRelease?>(null) }
@@ -719,6 +722,22 @@ private fun SettingsPageContent(
                         iconTint = SettingsIconColors.Blue,
                     )
                     CouiIconDivider()
+                    SwitchPref(
+                        context = context, prefs = agentPrefs,
+                        title = stringResource(R.string.settings_steer),
+                        summary = stringResource(R.string.settings_steer_summary),
+                        key = Prefs.Keys.AGENT_STEER_ENABLED,
+                        icon = Icons.AutoMirrored.Rounded.Chat, iconTint = SettingsIconColors.Blue,
+                    )
+                    CouiIconDivider()
+                    SwitchPref(
+                        context = context, prefs = agentPrefs,
+                        title = stringResource(R.string.settings_clarify),
+                        summary = stringResource(R.string.settings_clarify_summary),
+                        key = Prefs.Keys.AGENT_CLARIFY_ENABLED,
+                        icon = Icons.AutoMirrored.Rounded.Help, iconTint = SettingsIconColors.Green,
+                    )
+                    CouiIconDivider()
                     CouiPreference(
                         title = stringResource(R.string.ui_linux_tool_environment_314d22),
                         icon = {
@@ -844,6 +863,14 @@ private fun SettingsPageContent(
                         startAction = {
                             CouiSettingsIcon(Icons.Rounded.Language, SettingsIconColors.Blue)
                         },
+                    )
+                    CouiIconDivider()
+                    SwitchPref(
+                        context = context, prefs = agentPrefs,
+                        title = stringResource(R.string.settings_open_links_in_app),
+                        summary = stringResource(R.string.settings_open_links_in_app_summary),
+                        key = Prefs.Keys.OPEN_LINKS_IN_APP,
+                        icon = Icons.Rounded.TravelExplore, iconTint = SettingsIconColors.Blue,
                     )
                     CouiIconDivider()
                     CouiPreference(
@@ -989,7 +1016,7 @@ private fun SettingsPageContent(
                             onConfirm = {
                                 val target = activeUpdate
                                 availableUpdate = null
-                                if (target != null) openUrl(target.url)
+                                if (target != null) AppLinkOpener.open(context, target.url, openInApp = false)
                             },
                         )
                     }
@@ -1114,6 +1141,20 @@ private fun SettingsPageContent(
                             icon = Icons.Rounded.Layers,
                             history = enhancementHistory,
                         )
+                        SwitchPref(
+                            context = context, prefs = agentPrefs,
+                            title = stringResource(R.string.settings_steer),
+                            summary = stringResource(R.string.settings_steer_summary),
+                            key = Prefs.Keys.AGENT_STEER_ENABLED,
+                            icon = Icons.AutoMirrored.Rounded.Chat, iconTint = SettingsIconColors.Blue,
+                        )
+                        SwitchPref(
+                            context = context, prefs = agentPrefs,
+                            title = stringResource(R.string.settings_clarify),
+                            summary = stringResource(R.string.settings_clarify_summary),
+                            key = Prefs.Keys.AGENT_CLARIFY_ENABLED,
+                            icon = Icons.AutoMirrored.Rounded.Help, iconTint = SettingsIconColors.Green,
+                        )
                         ArrowPreference(
                             title = stringResource(R.string.ui_linux_tool_environment_314d22),
                             startAction = { SettingsIcon(Icons.Rounded.Inventory2) },
@@ -1233,6 +1274,13 @@ private fun SettingsPageContent(
                         )
                         LanguagePreference(
                             startAction = { SettingsIcon(Icons.Rounded.Language) },
+                        )
+                        SwitchPref(
+                            context = context, prefs = agentPrefs,
+                            title = stringResource(R.string.settings_open_links_in_app),
+                            summary = stringResource(R.string.settings_open_links_in_app_summary),
+                            key = Prefs.Keys.OPEN_LINKS_IN_APP,
+                            icon = Icons.Rounded.TravelExplore, iconTint = SettingsIconColors.Blue,
                         )
                         ArrowPreference(
                             title = stringResource(R.string.data_backup_title),
@@ -1370,7 +1418,7 @@ private fun SettingsPageContent(
                 confirmText = stringResource(R.string.ui_update_go_download),
                 onConfirm = {
                     availableUpdate = null
-                    openUrl(update.url)
+                    AppLinkOpener.open(context, update.url, openInApp = false)
                 },
                 onDismissRequest = { availableUpdate = null },
             )

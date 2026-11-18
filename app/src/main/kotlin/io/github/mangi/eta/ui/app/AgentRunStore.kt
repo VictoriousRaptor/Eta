@@ -18,6 +18,7 @@ internal class AgentRunStore(
         var stopRequested = false
         var stoppedByUser = false
         var settling = false
+        val rejectedSteerQueueIds = mutableSetOf<String>()
         var guiStatus: GuiControlStatus? = null
     }
 
@@ -58,6 +59,13 @@ internal class AgentRunStore(
     fun isStopRequested(runId: String): Boolean = entries[runId]?.stopRequested == true
 
     fun wasStoppedByUser(runId: String): Boolean = entries[runId]?.stoppedByUser == true
+
+    fun recordRejectedQueueSteer(runId: String, queueId: String) {
+        entries[runId]?.rejectedSteerQueueIds?.add(queueId)
+    }
+
+    fun rejectedSteerQueueIds(runId: String): Set<String> =
+        entries[runId]?.rejectedSteerQueueIds.orEmpty()
 
     fun beginSettlement(runId: String): Boolean {
         val entry = entries[runId] ?: return false

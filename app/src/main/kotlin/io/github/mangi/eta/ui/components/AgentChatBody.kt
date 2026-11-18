@@ -47,6 +47,9 @@ import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import io.github.mangi.eta.agent.runtime.AgentUserInputRequest
+import io.github.mangi.eta.agent.runtime.AgentUserInputAnswer
+import io.github.mangi.eta.ui.model.SteerAcknowledgement
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
@@ -164,6 +167,7 @@ internal fun AgentChatBody(
     canCompactContext: Boolean,
     onModelSelected: (String) -> Unit,
     onSubmit: (String) -> Unit,
+    onSteer: (String) -> Unit = {},
     onInterruptAndSubmit: (String) -> Unit = onSubmit,
     onSteerQueuedMessage: (String) -> Unit = {},
     onRecallQueuedMessage: (String, String) -> Unit = { _, _ -> },
@@ -189,6 +193,12 @@ internal fun AgentChatBody(
     historyLoadState: ConversationHistoryLoadState = ConversationHistoryLoadState.Idle,
     onLoadEarlierMessages: () -> Unit = {},
     onHistoryViewportChanged: (Boolean) -> Unit = {},
+    steerEnabled: Boolean = false,
+    interactionSubmitting: Boolean = false,
+    steerAcknowledgement: SteerAcknowledgement? = null,
+    onSteerAcknowledgementConsumed: (Long) -> Unit = {},
+    pendingUserInput: AgentUserInputRequest? = null,
+    onAnswerUserInput: (AgentUserInputAnswer) -> Unit = {},
     isDrawerOpen: Boolean = false,
     topInset: Dp = 0.dp,
     modifier: Modifier = Modifier,
@@ -261,6 +271,13 @@ internal fun AgentChatBody(
             isBranching = isBranching,
             contextUsage = contextUsage,
             isStreaming = isStreaming,
+            steerEnabled = steerEnabled,
+            interactionSubmitting = interactionSubmitting,
+            steerAcknowledgement = steerAcknowledgement,
+            onSteerAcknowledgementConsumed = onSteerAcknowledgementConsumed,
+            onSteer = onSteer,
+            pendingUserInput = pendingUserInput,
+            onAnswerUserInput = onAnswerUserInput,
             reasoningEffort = reasoningEffort,
             availableReasoningEfforts = availableReasoningEfforts,
             pendingImages = pendingImages,
@@ -334,6 +351,12 @@ private fun AgentChatScaffold(
     isBranching: Boolean,
     contextUsage: AgentContextUsageUi,
     isStreaming: Boolean,
+    steerEnabled: Boolean,
+    interactionSubmitting: Boolean,
+    steerAcknowledgement: SteerAcknowledgement?,
+    onSteerAcknowledgementConsumed: (Long) -> Unit,
+    pendingUserInput: AgentUserInputRequest?,
+    onAnswerUserInput: (AgentUserInputAnswer) -> Unit,
     reasoningEffort: ReasoningEffort,
     availableReasoningEfforts: List<ReasoningEffort>,
     pendingImages: List<PendingImageUi>,
@@ -346,6 +369,7 @@ private fun AgentChatScaffold(
     keepBottomAnchored: Boolean,
     onBottomAnchorChanged: (Boolean) -> Unit,
     onSubmit: (String) -> Unit,
+    onSteer: (String) -> Unit,
     onInterruptAndSubmit: (String) -> Unit,
     onSteerQueuedMessage: (String) -> Unit,
     onRecallQueuedMessage: (String, String) -> Unit,
@@ -393,6 +417,13 @@ private fun AgentChatScaffold(
         ),
         bottomBar = {
             AgentChatBottomBar(
+                steerEnabled = steerEnabled,
+                interactionSubmitting = interactionSubmitting,
+                steerAcknowledgement = steerAcknowledgement,
+                onSteerAcknowledgementConsumed = onSteerAcknowledgementConsumed,
+                onSteer = onSteer,
+                pendingUserInput = pendingUserInput,
+                onAnswerUserInput = onAnswerUserInput,
                 input = input,
                 isCompacting = isCompacting,
                 contextUsage = contextUsage,
@@ -1064,6 +1095,12 @@ internal fun resolveFinalResultMessageIds(
 
 @Composable
 private fun AgentChatBottomBar(
+    steerEnabled: Boolean,
+    interactionSubmitting: Boolean,
+    steerAcknowledgement: SteerAcknowledgement?,
+    onSteerAcknowledgementConsumed: (Long) -> Unit,
+    pendingUserInput: AgentUserInputRequest?,
+    onAnswerUserInput: (AgentUserInputAnswer) -> Unit,
     input: String,
     isCompacting: Boolean,
     contextUsage: AgentContextUsageUi,
@@ -1079,6 +1116,7 @@ private fun AgentChatBottomBar(
     messageEdit: MessageEditUiState?,
     glassBackdrop: Backdrop?,
     onSubmit: (String) -> Unit,
+    onSteer: (String) -> Unit,
     onInterruptAndSubmit: (String) -> Unit,
     onSteerQueuedMessage: (String) -> Unit,
     onRecallQueuedMessage: (String, String) -> Unit,
@@ -1124,7 +1162,16 @@ private fun AgentChatBottomBar(
                 .windowInsetsPadding(bottomBarInsets)
                 .padding(top = 14.dp, start = 14.dp, end = 14.dp, bottom = 10.dp),
         ) {
+            pendingUserInput?.let { request ->
+                AgentClarificationCard(request, interactionSubmitting, onAnswerUserInput,
+                    modifier = Modifier.padding(bottom = 8.dp))
+            }
             AgentChatInputBar(
+                steerEnabled = steerEnabled,
+                interactionSubmitting = interactionSubmitting,
+                steerAcknowledgement = steerAcknowledgement,
+                onSteerAcknowledgementConsumed = onSteerAcknowledgementConsumed,
+                onSteer = onSteer,
                 input = input,
                 isCompacting = isCompacting,
                 contextUsage = contextUsage,

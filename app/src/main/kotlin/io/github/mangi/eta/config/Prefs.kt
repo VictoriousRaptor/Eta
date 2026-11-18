@@ -38,6 +38,7 @@ internal object Prefs {
         const val ASSISTANT_AUTO_CONFIG = "assistant_auto_config"
         const val GESTURE_BAR_CIRCLE_TO_SEARCH = "gesture_bar_circle_to_search"
         const val DOUBLE_FINGER_CIRCLE_TO_SEARCH = "double_finger_circle_to_search"
+        const val OPEN_LINKS_IN_APP = "open_links_in_app"
         const val AGENT_TERMINAL_TOOLS = "agent_terminal_tools"
         const val AGENT_BROWSER_TOOLS = "agent_browser_tools"
         const val AGENT_DEVICE_DIRECT_TOOLS = "agent_device_direct_tools"
@@ -49,6 +50,8 @@ internal object Prefs {
         const val AGENT_SUBAGENT_ENABLED = "agent_subagent_enabled"
         const val AGENT_VIRTUAL_DISPLAY_ENABLED = "agent_virtual_display_enabled"
         const val AGENT_KEEP_SCREEN_ON_ENABLED = "agent_keep_screen_on_enabled"
+        const val AGENT_STEER_ENABLED = "agent_steer_enabled"
+        const val AGENT_CLARIFY_ENABLED = "agent_clarify_enabled"
         const val AGENT_RUNTIME_CONFIG_JSON = "agent_runtime_config_json"
         const val AGENT_DISABLED_TOOLS_JSON = "agent_disabled_tools_json"
 
@@ -58,6 +61,7 @@ internal object Prefs {
             ASSISTANT_AUTO_CONFIG to false,
             GESTURE_BAR_CIRCLE_TO_SEARCH to true,
             DOUBLE_FINGER_CIRCLE_TO_SEARCH to false,
+            OPEN_LINKS_IN_APP to true,
             AGENT_TERMINAL_TOOLS to true,
             AGENT_BROWSER_TOOLS to true,
             AGENT_DEVICE_DIRECT_TOOLS to true,
@@ -68,10 +72,13 @@ internal object Prefs {
             AGENT_SUBAGENT_ENABLED to true,
             AGENT_VIRTUAL_DISPLAY_ENABLED to true,
             AGENT_KEEP_SCREEN_ON_ENABLED to true,
+            AGENT_STEER_ENABLED to true,
+            AGENT_CLARIFY_ENABLED to true,
         )
 
         /** 由 Eta Runtime 最终裁决、不要求 Xposed 框架在线的开关。 */
         val LOCAL_AGENT_KEYS: Set<String> = setOf(
+            OPEN_LINKS_IN_APP,
             AGENT_TERMINAL_TOOLS,
             AGENT_BROWSER_TOOLS,
             AGENT_DEVICE_DIRECT_TOOLS,
@@ -82,6 +89,8 @@ internal object Prefs {
             AGENT_SUBAGENT_ENABLED,
             AGENT_VIRTUAL_DISPLAY_ENABLED,
             AGENT_KEEP_SCREEN_ON_ENABLED,
+            AGENT_STEER_ENABLED,
+            AGENT_CLARIFY_ENABLED,
         )
     }
 

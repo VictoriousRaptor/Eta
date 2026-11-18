@@ -2,6 +2,9 @@ package io.github.mangi.eta.agent.runtime
 
 import android.app.Application
 import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.overlay.AgentOverlayInteractionDraft
+import io.github.mangi.eta.agent.overlay.AgentOverlayState
+import io.github.mangi.eta.ui.components.AgentClarificationPagerState
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -20,6 +23,54 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36], application = Application::class)
 class RuntimeRunRegistryTest {
+    @Test
+    fun interactionDraftAndPresentationStateBelongToTheirOwnRun() {
+        val registry = RuntimeRunRegistry()
+        val a = registry.accept("a", "conversation-a")
+        val b = registry.accept("b", "conversation-b")
+        a.interactionDraft = AgentOverlayInteractionDraft(supplementText = "草稿 A", supplementMode = true)
+        a.overlayRequested = true
+        a.capsuleExpanded = true
+        a.hasPresentedClarification = true
+
+        assertEquals(AgentOverlayInteractionDraft.Empty, b.interactionDraft)
+        assertFalse(b.overlayRequested)
+        assertFalse(b.capsuleExpanded)
+        assertFalse(b.hasPresentedClarification)
+        registry.finish(b.runId, b.session)
+        assertEquals("草稿 A", a.interactionDraft.supplementText)
+        assertTrue(a.overlayRequested)
+        assertTrue(a.capsuleExpanded)
+    }
+
+    @Test
+    fun newClarificationResetsOnlyItsOwnAnswersAndPreservesSupplementText() {
+        val registry = RuntimeRunRegistry()
+        val a = registry.accept("a", "conversation-a")
+        val b = registry.accept("b", "conversation-b")
+        val first = AgentUserInputRequest("request-1", listOf(AgentUserInputQuestion("q", "问题")))
+        a.interactionDraft = AgentOverlayInteractionDraft(supplementText = "补充草稿", supplementMode = true)
+        a.overlayState = AgentOverlayState.Initial.copy(pendingUserInput = first)
+        a.interactionDraft = a.interactionDraft.copy(
+            clarificationState = AgentClarificationPagerState(first).withAnswer("q", "回答"),
+        )
+        b.interactionDraft = AgentOverlayInteractionDraft(supplementText = "草稿 B", supplementMode = true)
+
+        a.overlayState = a.overlayState.copy(detailText = "继续等待")
+        assertEquals("回答", a.interactionDraft.clarificationState?.answers?.get("q"))
+        assertFalse(a.interactionDraft.supplementMode)
+        a.overlayState = a.overlayState.copy(pendingUserInput = first.copy(id = "request-2"))
+        assertEquals("request-2", a.interactionDraft.clarificationState?.request?.id)
+        assertTrue(a.interactionDraft.clarificationState!!.answers.values.all(String::isEmpty))
+        assertEquals("补充草稿", a.interactionDraft.supplementText)
+        assertEquals("草稿 B", b.interactionDraft.supplementText)
+        assertTrue(b.interactionDraft.supplementMode)
+
+        a.overlayState = a.overlayState.copy(pendingUserInput = null)
+        assertEquals(null, a.interactionDraft.clarificationState)
+        assertEquals("补充草稿", a.interactionDraft.supplementText)
+    }
+
     @Test
     fun pendingRequestsCountTowardCapacityAndDuplicatesDoNotCreateAnotherRun() {
         val registry = RuntimeRunRegistry(capacity = 2)

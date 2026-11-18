@@ -7,9 +7,7 @@ import io.github.mangi.eta.ui.model.QueuedMessageUi
  * 会话内排队发送（Queue）与插话发送（Steer）的纯状态转换器。
  *
  * - 排队发送追加到队尾，等待当前回合自然结束后按 FIFO 顺序自动发出。
- * - 插话发送优先向当前运行中的 Run 注入 steering 补充指令（不中断工具与请求、保留缓存）；
- *   在 IPC 提交期间暂时带着 [QueuedMessageUi.immediateInterrupt] 占住队首，被接纳后移除，
- *   若当前 Run 已结束或不可接纳则退回队首等待收尾后发出。
+ * - 运行中的 Steer 由调用方暂存，拒绝后恢复队列项，并在原 run 收尾时跳过该项。
  * - 用户主动点击停止按钮时保留队列不自动发出，防止想停下时后续排队指令继续跑起来。
  */
 internal object AgentMessageQueueReducer {
@@ -146,12 +144,14 @@ internal object AgentMessageQueueReducer {
     fun pollNextToSendAfterRun(
         state: AgentChatUiState,
         stoppedByUser: Boolean,
+        excludedIds: Set<String> = emptySet(),
     ): Pair<AgentChatUiState, QueuedMessageUi?> {
-        val first = state.queuedMessages.firstOrNull() ?: return state to null
-        if (!first.immediateInterrupt && stoppedByUser) {
+        val index = state.queuedMessages.indexOfFirst { it.id !in excludedIds }
+        val next = state.queuedMessages.getOrNull(index) ?: return state to null
+        if (!next.immediateInterrupt && stoppedByUser) {
             return clearInterruptFlags(state) to null
         }
-        val remaining = state.queuedMessages.drop(1)
-        return state.copy(queuedMessages = remaining) to first.copy(immediateInterrupt = false)
+        val remaining = state.queuedMessages.toMutableList().apply { removeAt(index) }
+        return state.copy(queuedMessages = remaining) to next.copy(immediateInterrupt = false)
     }
 }

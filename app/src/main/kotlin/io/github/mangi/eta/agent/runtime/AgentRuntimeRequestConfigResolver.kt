@@ -55,6 +55,7 @@ internal object AgentRuntimeRequestConfigResolver {
             reasoningEffort = effort,
             autoCompactionEnabled = runtimeConfig.autoCompactionEnabled && entry.autoCompactionEnabled,
             supportsSearchSuggestions = entry.supportsSearchSuggestions,
+            clarifyEnabled = entry.clarifyEnabled,
         )
         val handoff = request.handoff ?: return request.copy(config = config)
         val archivePayload = AgentExternalArchivePayload.from(handoff.payload)

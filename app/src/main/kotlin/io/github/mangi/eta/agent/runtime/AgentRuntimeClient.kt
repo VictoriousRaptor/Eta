@@ -178,6 +178,32 @@ internal class AgentRuntimeClient(
         }
     }
 
+    fun answerUserInput(runId: String, answer: AgentUserInputAnswer): Boolean = sendUserInputAnswer(
+        runId, AgentUserInputCodec.encode(answer),
+    )
+
+    /** 在调用者的工作线程等待接收确认；拒绝或断连时保留 UI 草稿。 */
+    private fun sendUserInputAnswer(runId: String, payload: String): Boolean {
+        if (runId.isBlank() || payload.length > 32000) return false
+        return withRuntimeMessenger(false) { service ->
+            val latch = CountDownLatch(1)
+            val accepted = AtomicReference(false)
+            val reply = Messenger(object : Handler(Looper.getMainLooper()) {
+                override fun handleMessage(msg: Message) {
+                    if (msg.what == AgentRuntimeWire.MSG_ANSWER_USER_INPUT_RESPONSE) {
+                        accepted.set(msg.data.getBoolean("accepted"))
+                        latch.countDown()
+                    }
+                }
+            })
+            service.send(Message.obtain(null, AgentRuntimeWire.MSG_ANSWER_USER_INPUT).apply {
+                data = AgentRuntimeWire.ackBundle(runId).apply { putString("payload", payload) }
+                replyTo = reply
+            })
+            latch.await(5, TimeUnit.SECONDS) && accepted.get()
+        }
+    }
+
     fun ackResult(runId: String): Boolean {
         if (runId.isBlank()) return false
         return withRuntimeMessenger(false) { serviceMessenger ->
