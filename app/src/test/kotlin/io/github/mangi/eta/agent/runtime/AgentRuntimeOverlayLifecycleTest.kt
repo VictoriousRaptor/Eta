@@ -200,7 +200,8 @@ class AgentRuntimeOverlayLifecycleTest {
         val virtualDisplay = field("virtualDisplayState") as MutableState<VirtualDisplaySnapshot>
         virtualDisplay.value = VirtualDisplaySnapshot(active = true, displayId = 2)
         val run = run("virtual-clarify")
-        run.overlayRequested = true
+        val control = gui.openRun(run.runId, run.session.controller)
+        control.withAction { }
         present(run)
         invoke("showOverlay")
         invoke("toggleCapsule")
@@ -230,6 +231,7 @@ class AgentRuntimeOverlayLifecycleTest {
         pump()
         assertEquals(dp(524), (field("capsuleParams") as WindowManager.LayoutParams).height)
         assertTrue(registry.contains(run))
+        control.close()
     }
 
     @Test
@@ -302,10 +304,10 @@ class AgentRuntimeOverlayLifecycleTest {
     @Test
     fun backgroundRestoresExpandedControlsAndSupplementDraftAtTheirOriginalHeight() = withRecomposerPolicy { pump ->
         val run = run("draft")
-        run.overlayRequested = true
-        run.capsuleExpanded = true
-        present(run)
-        invoke("showOverlay")
+        val control = gui.openRun(run.runId, run.session.controller)
+        control.withAction { }
+        pump()
+        invoke("toggleCapsule")
         pump()
         val activity = TestActivity()
         tracker.onActivityStarted(activity)
@@ -325,6 +327,7 @@ class AgentRuntimeOverlayLifecycleTest {
         val params = field("capsuleParams") as WindowManager.LayoutParams
         assertEquals(dp(260), params.height)
         assertEquals(0, params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+        control.close()
     }
 
     @Test
@@ -397,9 +400,41 @@ class AgentRuntimeOverlayLifecycleTest {
     }
 
     @Test
+    fun releasedGuiBeforeClarificationDoesNotKeepOrRestoreAmbientWindows() = withRecomposerPolicy { pump ->
+        val run = run("released-gui")
+        val control = gui.openRun(run.runId, run.session.controller)
+        control.withAction { }
+        pump()
+        assertNotNull(field("glowView"))
+        control.close()
+        pump()
+        assertNull(gui.state.value.ownerRunId)
+        assertNull(field("glowView"))
+
+        val request = waiting("question").pendingUserInput!!
+        event(run, AgentEvent.UserInputRequested(request))
+        pump()
+        val glow = field("glowView") as View
+        val capsule = field("capsuleView") as View
+        event(run, AgentEvent.UserInputAnswered(AgentUserInputAnswer(request.id, mapOf("q" to "答案"))))
+        pump()
+        assertFalse(glow.isAttachedToWindow)
+        assertFalse(capsule.isAttachedToWindow)
+        val activity = TestActivity()
+        tracker.onActivityStarted(activity)
+        pump()
+        tracker.onActivityStopped(activity)
+        pump()
+        assertNull(field("capsuleView"))
+        assertNull(field("glowView"))
+        assertTrue(registry.contains(run))
+    }
+
+    @Test
     fun answeredClarificationRestoresPreviousExpansionAndWindowFlags() = withRecomposerPolicy { pump ->
         val run = run("existing-capsule")
-        run.overlayRequested = true
+        val control = gui.openRun(run.runId, run.session.controller)
+        control.withAction { }
         present(run)
         invoke("showOverlay")
         pump()
@@ -422,6 +457,7 @@ class AgentRuntimeOverlayLifecycleTest {
             assertEquals(flagsBeforeClarification, params.flags)
             assertEquals(dp(if (wasExpanded) 124 else 68), params.height)
         }
+        control.close()
     }
 
     @Test

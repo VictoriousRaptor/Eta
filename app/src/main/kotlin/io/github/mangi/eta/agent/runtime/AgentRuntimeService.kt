@@ -1559,15 +1559,10 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         state.value = run.overlayState
         capsuleExpanded.value = run.capsuleExpanded
         val guiState = guiControl.state.value
-        if (guiState.ownerRunId != null && guiState.ownerRunId != run.runId ||
-            guiState.ownerRunId == null && !guiState.userPaused && pendingInputRun() != null) {
-            applyGuiControlState(guiState)
-        } else if (run.overlayRequested && run.entrySurfaceReady) {
+        if (guiState.ownerRunId == run.runId && run.entrySurfaceReady) {
             setCapsuleInputMode(run.interactionDraft.supplementMode)
-            ensureOverlayVisible()
-        } else {
-            removeAmbientWindows()
         }
+        applyGuiControlState(guiState)
     }
 
     private fun setCapsuleInputMode(focusable: Boolean) {
@@ -1646,7 +1641,7 @@ internal class AgentRuntimeService : Service(), LifecycleOwner, SavedStateRegist
         }
         val guiState = guiControl.state.value
         val owner = guiState.ownerRunId?.let(runs::get)
-        val run = owner ?: if (!guiState.userPaused) pendingInputRun() ?: displayedRun else displayedRun
+        val run = owner ?: if (!guiState.userPaused) pendingInputRun() else null
         if (run != null && AgentOverlayVisibilityPolicy.shouldRestoreFor(
                 activeRun = runs.contains(run) && !run.session.isTerminal && run.entrySurfaceReady,
                 overlayRequested = run.overlayRequested || run.overlayState.pendingUserInput != null,
